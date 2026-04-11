@@ -1,0 +1,26 @@
+[package]
+name = "nix-update-git"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "nix_update_git"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nix-update-git"
+path = "src/main.rs"
+
+[dependencies]
+rnix = "0.11"
+rowan = "0.15"
+clap = { version = "4.5", features = ["derive"] }
+anyhow = "1.0"
+thiserror = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+semver = "1.0"
+
+[dev-dependencies]
+tempfile = "3.10"
+assert_cmd = "2.0"
+predicates = "3.0"

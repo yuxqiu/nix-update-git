@@ -14,8 +14,6 @@ Options:
   -u, --update        Perform updates
   -i, --interactive   Confirm each update
   -j, --jobs <N>      Number of parallel update jobs (default: 4)
-  --github-token <T>  GitHub API token (env: GITHUB_TOKEN)
-  --gitlab-token <T>  GitLab API token (env: GITLAB_TOKEN)
   -h, --help          Show help
 ```
 
@@ -36,8 +34,8 @@ Special behavior:
 **Supported Input Types:**
 | Type | Detection Method |
 |------|------------------|
-| `github:owner/repo` | GitHub API (releases/tags) |
-| `gitlab:owner/repo` | GitLab API |
+| `github:owner/repo` | git ls-remote |
+| `gitlab:owner/repo` | git ls-remote |
 | `sourcehut:~user/repo` | git ls-remote |
 | `git+https://...` | git ls-remote |
 | `git+ssh://...` | git ls-remote
@@ -166,7 +164,6 @@ pub trait HashPrefetcher: Send + Sync {
 ### Stage 2: Flake Input Rule
 
 - Parse `inputs` block in flake.nix
-- Implement GitHub/GitLab API clients
 - Semver/date version comparison
 - Generate updated ref values
 
@@ -192,7 +189,6 @@ pub trait HashPrefetcher: Send + Sync {
 3. **Interactive Mode** - confirm each update
 4. **Config File** - `.nix-updategitrc` per-project settings
 5. **Git Integration** - auto-commit changes
-6. **Authentication** - GITHUB_TOKEN and GITLAB_TOKEN support
 
 ## 7. Tech Decisions
 
@@ -206,6 +202,5 @@ pub trait HashPrefetcher: Send + Sync {
 
 ## 8. Testing Strategy
 
-- **Mocking**: Use `mockito` or similar to mock GitHub/GitLab API responses.
 - **Git Mocks**: Create temporary local git repositories for `git ls-remote` tests.
 - **Snapshot Testing**: Test rule application results against expected Nix AST snapshots.
