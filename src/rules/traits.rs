@@ -1,4 +1,4 @@
-use crate::parser::NixNode;
+use crate::parser::{NixNode, TextRange};
 use anyhow::Result;
 
 #[derive(Debug, Clone)]
@@ -6,7 +6,7 @@ pub struct Update {
     pub field: String,
     pub old_value: String,
     pub new_value: String,
-    pub range: (usize, usize),
+    pub range: TextRange,
 }
 
 impl Update {
@@ -14,7 +14,7 @@ impl Update {
         field: impl Into<String>,
         old_value: impl Into<String>,
         new_value: impl Into<String>,
-        range: (usize, usize),
+        range: TextRange,
     ) -> Self {
         Self {
             field: field.into(),
@@ -47,12 +47,11 @@ impl RuleRegistry {
     pub fn check_all(&self, node: &NixNode) -> Result<Vec<(String, Vec<Update>)>> {
         let mut results = Vec::new();
         for rule in &self.rules {
-            if rule.matches(node) {
-                if let Some(updates) = rule.check(node)? {
-                    if !updates.is_empty() {
-                        results.push((rule.name().to_string(), updates));
-                    }
-                }
+            if rule.matches(node)
+                && let Some(updates) = rule.check(node)?
+                && !updates.is_empty()
+            {
+                results.push((rule.name().to_string(), updates));
             }
         }
         Ok(results)

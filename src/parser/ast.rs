@@ -1,67 +1,45 @@
 use rowan::ast::AstNode;
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Debug)]
 pub enum NixError {
-    #[error("Parse error: {0}")]
     ParseError(String),
-
-    #[error("IO error: {0}")]
-    IoError(#[from] std::io::Error),
-
-    #[error("Invalid node: {0}")]
     InvalidNode(String),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Location {
-    pub file: Arc<Path>,
-    pub line: usize,
-    pub column: usize,
-}
-
-impl std::fmt::Display for Location {
+impl std::fmt::Display for NixError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}:{}", self.file.display(), self.line, self.column)
+        match self {
+            NixError::ParseError(msg) => write!(f, "Parse error: {}", msg),
+            NixError::InvalidNode(msg) => write!(f, "Invalid node: {}", msg),
+        }
     }
 }
 
+impl std::error::Error for NixError {}
+
 pub struct NixFile {
-    path: Arc<Path>,
     root: rnix::Root,
     source: Arc<str>,
 }
 
 impl NixFile {
-    pub fn parse(path: &Path, content: &str) -> Result<Self, NixError> {
+    pub fn parse(_path: &Path, content: &str) -> Result<Self, NixError> {
         let parse_result = rnix::Root::parse(content);
         if !parse_result.errors().is_empty() {
-            return Err(NixError::ParseError(format!(
-                "{:?}",
-                parse_result.errors().first().unwrap()
-            )));
+            let error_msgs: Vec<String> = parse_result
+                .errors()
+                .iter()
+                .map(|e| e.to_string())
+                .collect();
+            return Err(NixError::ParseError(error_msgs.join(", ")));
         }
         let root = parse_result.tree();
         Ok(Self {
-            path: Arc::from(path),
             root,
             source: Arc::from(content),
         })
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
-    pub fn root(&self) -> &rnix::Root {
-        &self.root
-    }
-
-    pub fn syntax(&self) -> &rnix::SyntaxNode {
-        self.root.syntax()
     }
 
     pub fn source(&self) -> &str {
@@ -69,33 +47,24 @@ impl NixFile {
     }
 
     pub fn root_node(&self) -> NixNode {
-        NixNode::new(self.syntax().clone(), &self.path, self.source.clone())
+        NixNode::new(
+            self.root.syntax().clone(),
+            Arc::from(Path::new("")),
+            self.source.clone(),
+        )
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct NixNode {
     node: rnix::SyntaxNode,
-    location: Location,
+    file: Arc<Path>,
     source: Arc<str>,
 }
 
 impl NixNode {
-    pub fn new(node: rnix::SyntaxNode, path: &Path, source: Arc<str>) -> Self {
-        let location = Location {
-            file: Arc::from(path),
-            line: 1,
-            column: 1,
-        };
-        Self {
-            node,
-            location,
-            source,
-        }
-    }
-
-    pub fn location(&self) -> Location {
-        self.location.clone()
+    pub fn new(node: rnix::SyntaxNode, file: Arc<Path>, source: Arc<str>) -> Self {
+        Self { node, file, source }
     }
 
     pub fn kind(&self) -> rnix::SyntaxKind {
@@ -109,7 +78,7 @@ impl NixNode {
     pub fn children(&self) -> Vec<NixNode> {
         self.node
             .children()
-            .map(|child| NixNode::new(child, &self.location.file, self.source.clone()))
+            .map(|child| NixNode::new(child, self.file.clone(), self.source.clone()))
             .collect()
     }
 
@@ -119,33 +88,14 @@ impl NixNode {
         }
     }
 
-    pub fn syntax(&self) -> &rnix::SyntaxNode {
-        &self.node
-    }
-
-    pub fn source(&self) -> &str {
-        &self.source
-    }
-
     pub fn has_pin_comment(&self) -> bool {
-        Self::check_pin_in_node(&self.node)
-    }
-
-    fn check_pin_in_node(node: &rnix::SyntaxNode) -> bool {
-        for element in node.children_with_tokens() {
-            match element {
-                rowan::NodeOrToken::Token(t) => {
-                    if t.kind() == rnix::SyntaxKind::TOKEN_COMMENT {
-                        let text = t.text().trim();
-                        if text.trim_start_matches('#').trim().starts_with("pin") {
-                            return true;
-                        }
-                    }
-                }
-                rowan::NodeOrToken::Node(n) => {
-                    if Self::check_pin_in_node(&n) {
-                        return true;
-                    }
+        for element in self.node.children_with_tokens() {
+            if let rowan::NodeOrToken::Token(t) = element
+                && t.kind() == rnix::SyntaxKind::TOKEN_COMMENT
+            {
+                let text = t.text().trim();
+                if text.trim_start_matches('#').trim().starts_with("pin") {
+                    return true;
                 }
             }
         }
@@ -191,11 +141,7 @@ impl NixNode {
         ];
         for child in self.node.children() {
             if value_kinds.contains(&child.kind()) {
-                return Some(NixNode::new(
-                    child,
-                    &self.location.file,
-                    self.source.clone(),
-                ));
+                return Some(NixNode::new(child, self.file.clone(), self.source.clone()));
             }
         }
         None
@@ -211,7 +157,7 @@ impl NixNode {
         } else if text.starts_with('"') && text.ends_with('"') && text.len() >= 2 {
             Some(text[1..text.len() - 1].to_string())
         } else {
-            Some(text)
+            None
         }
     }
 
@@ -236,19 +182,12 @@ impl NixNode {
         value.string_content()
     }
 
-    pub fn find_attr_set(&self, key: &str) -> Option<NixNode> {
-        let entry = self.find_attr_by_key(key)?;
-        let value = entry.attr_value()?;
-        if value.kind() == rnix::SyntaxKind::NODE_ATTR_SET {
-            Some(value)
-        } else {
-            None
-        }
-    }
-
-    pub fn text_range(&self) -> (usize, usize) {
+    pub fn text_range(&self) -> TextRange {
         let range = self.node.text_range();
-        (usize::from(range.start()), usize::from(range.end()))
+        TextRange {
+            start: usize::from(range.start()),
+            end: usize::from(range.end()),
+        }
     }
 
     pub fn find_string_node(&self, key: &str) -> Option<NixNode> {
@@ -260,23 +199,12 @@ impl NixNode {
             None
         }
     }
+}
 
-    pub fn attr_set_entries(&self) -> HashMap<String, NixNode> {
-        let mut entries = HashMap::new();
-        if self.kind() != rnix::SyntaxKind::NODE_ATTR_SET {
-            return entries;
-        }
-        for child in self.children() {
-            if child.kind() == rnix::SyntaxKind::NODE_ATTRPATH_VALUE {
-                let segments = child.attrpath_segments();
-                if !segments.is_empty() {
-                    let key = segments.join(".");
-                    entries.insert(key, child);
-                }
-            }
-        }
-        entries
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TextRange {
+    pub start: usize,
+    pub end: usize,
 }
 
 #[derive(Debug)]
@@ -293,20 +221,5 @@ impl Iterator for NixNodeIterator {
             self.stack.push(child);
         }
         Some(node)
-    }
-}
-
-impl IntoIterator for &NixFile {
-    type Item = NixNode;
-    type IntoIter = NixNodeIterator;
-
-    fn into_iter(self) -> Self::IntoIter {
-        NixNodeIterator {
-            stack: vec![NixNode::new(
-                self.syntax().clone(),
-                self.path(),
-                self.source.clone(),
-            )],
-        }
     }
 }

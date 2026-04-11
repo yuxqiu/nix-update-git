@@ -10,7 +10,7 @@ impl GitFetcher {
         let output = Command::new("git")
             .args(["ls-remote", "--tags", "--refs", url])
             .output()
-            .context("Failed to execute git ls-remote")?;
+            .with_context(|| format!("Failed to execute git ls-remote for {}", url))?;
 
         if !output.status.success() {
             anyhow::bail!(
@@ -41,7 +41,7 @@ impl GitFetcher {
                 refs.push(GitRef {
                     sha: sha.to_string(),
                     kind: kind.to_string(),
-                    name: name.to_string(),
+                    name,
                     full_ref,
                 });
             }
@@ -61,32 +61,6 @@ impl GitFetcher {
         let tag_names: Vec<&str> = tags.iter().map(|t| t.name.as_str()).collect();
         Ok(VersionDetector::latest(&tag_names).map(|s| s.to_string()))
     }
-
-    pub fn get_sha_for_ref(url: &str, ref_name: &str) -> Result<String> {
-        let output = Command::new("git")
-            .args(["ls-remote", url, ref_name])
-            .output()
-            .context("Failed to execute git ls-remote")?;
-
-        if !output.status.success() {
-            anyhow::bail!(
-                "git ls-remote failed for ref {}: {}",
-                ref_name,
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-
-        let output_str = String::from_utf8_lossy(&output.stdout);
-        if let Some(line) = output_str.lines().next() {
-            if let Some((sha, _)) = line.split_once('\t') {
-                Ok(sha.to_string())
-            } else {
-                anyhow::bail!("Unexpected git ls-remote output format")
-            }
-        } else {
-            anyhow::bail!("No ref found for {}", ref_name)
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -95,12 +69,4 @@ pub struct GitRef {
     pub kind: String,
     pub name: String,
     pub full_ref: String,
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_git_fetcher_creation() {
-        let _fetcher = super::GitFetcher;
-    }
 }

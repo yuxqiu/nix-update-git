@@ -1,4 +1,4 @@
-use semver::{Version, VersionReq};
+use semver::Version;
 use std::cmp::Ordering;
 
 pub struct VersionDetector;
@@ -25,15 +25,6 @@ impl VersionDetector {
     fn parse_version(s: &str) -> Version {
         let stripped = s.strip_prefix('v').unwrap_or(s);
         Version::parse(stripped).unwrap_or_else(|_| Version::new(0, 0, 0))
-    }
-
-    pub fn satisfies(version: &str, requirement: &str) -> bool {
-        let version = Self::parse_version(version);
-        if let Ok(req) = VersionReq::parse(requirement) {
-            req.matches(&version)
-        } else {
-            false
-        }
     }
 }
 

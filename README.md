@@ -122,8 +122,6 @@ This is stage 2 of the planned implementation. Remaining work:
 - [ ] `builtins.fetchGit` / `builtins.fetchTarball` rules
 - [ ] Hash prefetching (`nix-prefetch-git` or internal)
 - [ ] SRI hash conversion
-- [ ] Parallel job support (`--jobs`)
-- [ ] Git integration (auto-commit)
 
 ## License
 

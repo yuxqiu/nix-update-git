@@ -13,7 +13,6 @@ Options:
   -c, --check         Check without making changes (default)
   -u, --update        Perform updates
   -i, --interactive   Confirm each update
-  -j, --jobs <N>      Number of parallel update jobs (default: 4)
   -h, --help          Show help
 ```
 
@@ -154,7 +153,7 @@ pub trait HashPrefetcher: Send + Sync {
 
 ### Stage 1: Architecture Foundation (No Rules)
 
-- Setup Rust project with rnix, clap, anyhow, tokio
+- Setup Rust project with rnix, clap, anyhow
 - Integrate rnix-parser, create wrapper types
 - CLI with argument parsing
 - Test infrastructure
@@ -195,7 +194,6 @@ pub trait HashPrefetcher: Send + Sync {
 | Choice   | Recommendation                                   |
 | -------- | ------------------------------------------------ |
 | Parser   | rnix (MIT, actively maintained)                  |
-| Async    | tokio for parallel version checks                |
 | Config   | TOML                                             |
 | Errors   | anyhow for app, specific for library             |
 | Prefetch | Call external `nix-prefetch-git` for correctness |

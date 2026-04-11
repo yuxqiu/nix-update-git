@@ -8,11 +8,18 @@ use std::io::{self, Write};
 fn apply_updates(content: &str, updates: &[Update]) -> String {
     let mut result = content.to_string();
     let mut sorted_updates: Vec<&Update> = updates.iter().collect();
-    sorted_updates.sort_by_key(|u| std::cmp::Reverse(u.range.0));
+    sorted_updates.sort_by_key(|u| std::cmp::Reverse(u.range.start));
 
     for update in sorted_updates {
-        let (start, end) = update.range;
+        let start = update.range.start;
+        let end = update.range.end;
         if start >= result.len() || end > result.len() || start >= end {
+            eprintln!(
+                "Warning: skipping update with invalid range {}..{} (file length {})",
+                start,
+                end,
+                result.len()
+            );
             continue;
         }
         let new_text = format!("\"{}\"", update.new_value);
@@ -37,8 +44,10 @@ fn process_file(
     registry: &RuleRegistry,
     update: bool,
     interactive: bool,
-) -> Result<()> {
+) -> Result<bool> {
     let content = fs::read_to_string(file_path)?;
+    let mut had_errors = false;
+
     match NixFile::parse(file_path, &content) {
         Ok(nix_file) => {
             let root_node = nix_file.root_node();
@@ -91,14 +100,17 @@ fn process_file(
                 }
                 Err(e) => {
                     eprintln!("Error checking {}: {}", file_path.display(), e);
+                    had_errors = true;
                 }
             }
         }
         Err(e) => {
             eprintln!("Failed to parse {}: {}", file_path.display(), e);
+            had_errors = true;
         }
     }
-    Ok(())
+
+    Ok(!had_errors)
 }
 
 fn main() -> Result<()> {
@@ -109,16 +121,31 @@ fn main() -> Result<()> {
         std::process::exit(1);
     }
 
+    if cli.check && cli.update {
+        eprintln!("Error: --check and --update are mutually exclusive.");
+        std::process::exit(1);
+    }
+
     let mut registry = RuleRegistry::new();
     registry.register(FlakeInputRule::new());
 
+    let mut all_ok = true;
     for file_path in &cli.files {
         if !file_path.exists() {
             eprintln!("File not found: {}", file_path.display());
+            all_ok = false;
             continue;
         }
 
-        process_file(file_path, &registry, cli.update, cli.interactive)?;
+        let should_update = cli.update;
+        let ok = process_file(file_path, &registry, should_update, cli.interactive)?;
+        if !ok {
+            all_ok = false;
+        }
+    }
+
+    if !all_ok {
+        std::process::exit(1);
     }
 
     Ok(())

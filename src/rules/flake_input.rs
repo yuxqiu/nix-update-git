@@ -1,4 +1,4 @@
-use crate::parser::NixNode;
+use crate::parser::{NixNode, TextRange};
 use crate::rules::traits::{Update, UpdateRule};
 use crate::utils::{GitFetcher, VersionDetector};
 use anyhow::Result;
@@ -39,7 +39,7 @@ struct ParsedFlakeUrl {
 #[derive(Debug)]
 struct SourceValue {
     value: String,
-    range: (usize, usize),
+    range: TextRange,
 }
 
 #[derive(Debug)]
@@ -62,7 +62,7 @@ impl FlakeInputRule {
         let url = url.trim();
 
         if let Some(rest) = url.strip_prefix("github:") {
-            let (rest_without_ref, inline_ref) = Self::extract_ref_from_short_url(rest);
+            let (rest_without_ref, inline_ref) = Self::extract_ref_from_url(rest, true);
             let (owner, repo) = rest_without_ref.split_once('/')?;
             Some(ParsedFlakeUrl {
                 flake_url: FlakeUrl::GitHub {
@@ -72,7 +72,7 @@ impl FlakeInputRule {
                 inline_ref,
             })
         } else if let Some(rest) = url.strip_prefix("gitlab:") {
-            let (rest_without_ref, inline_ref) = Self::extract_ref_from_short_url(rest);
+            let (rest_without_ref, inline_ref) = Self::extract_ref_from_url(rest, true);
             let (owner, repo) = rest_without_ref.split_once('/')?;
             Some(ParsedFlakeUrl {
                 flake_url: FlakeUrl::GitLab {
@@ -82,7 +82,7 @@ impl FlakeInputRule {
                 inline_ref,
             })
         } else if let Some(rest) = url.strip_prefix("sourcehut:") {
-            let (rest_without_ref, inline_ref) = Self::extract_ref_from_short_url(rest);
+            let (rest_without_ref, inline_ref) = Self::extract_ref_from_url(rest, true);
             let (owner, repo) = rest_without_ref.split_once('/')?;
             Some(ParsedFlakeUrl {
                 flake_url: FlakeUrl::SourceHut {
@@ -92,7 +92,7 @@ impl FlakeInputRule {
                 inline_ref,
             })
         } else if let Some(rest) = url.strip_prefix("git+https://") {
-            let (clean_url, inline_ref) = Self::extract_ref_from_git_url(rest);
+            let (clean_url, inline_ref) = Self::extract_ref_from_url(rest, false);
             Some(ParsedFlakeUrl {
                 flake_url: FlakeUrl::GitRemote {
                     url: format!("https://{}", clean_url),
@@ -100,7 +100,7 @@ impl FlakeInputRule {
                 inline_ref,
             })
         } else if let Some(rest) = url.strip_prefix("git+ssh://") {
-            let (clean_url, inline_ref) = Self::extract_ref_from_git_url(rest);
+            let (clean_url, inline_ref) = Self::extract_ref_from_url(rest, false);
             Some(ParsedFlakeUrl {
                 flake_url: FlakeUrl::GitRemote {
                     url: format!("ssh://{}", clean_url),
@@ -108,24 +108,18 @@ impl FlakeInputRule {
                 inline_ref,
             })
         } else if let Some(rest) = url.strip_prefix("git+file://") {
-            let (clean_path, inline_ref) = Self::extract_ref_from_git_url(rest);
+            let (clean_path, inline_ref) = Self::extract_ref_from_url(rest, false);
             Some(ParsedFlakeUrl {
                 flake_url: FlakeUrl::GitLocal { path: clean_path },
                 inline_ref,
             })
         } else if url.starts_with("git+http://") {
             let rest = url.strip_prefix("git+http://")?;
-            let (clean_url, inline_ref) = Self::extract_ref_from_git_url(rest);
+            let (clean_url, inline_ref) = Self::extract_ref_from_url(rest, false);
             Some(ParsedFlakeUrl {
                 flake_url: FlakeUrl::GitRemote {
                     url: format!("http://{}", clean_url),
                 },
-                inline_ref,
-            })
-        } else if url.starts_with('/') || url.starts_with("./") || url.starts_with("../") {
-            let (clean_path, inline_ref) = Self::extract_ref_from_git_url(url);
-            Some(ParsedFlakeUrl {
-                flake_url: FlakeUrl::GitLocal { path: clean_path },
                 inline_ref,
             })
         } else {
@@ -133,22 +127,12 @@ impl FlakeInputRule {
         }
     }
 
-    fn extract_ref_from_short_url(rest: &str) -> (String, Option<String>) {
+    fn extract_ref_from_url(rest: &str, trim_trailing_slash: bool) -> (String, Option<String>) {
         if let Some(qpos) = rest.find('?') {
-            let base = rest[..qpos].trim_end_matches('/');
-            let query = &rest[qpos + 1..];
-            let inline_ref = query
-                .split('&')
-                .find_map(|param| param.strip_prefix("ref="));
-            (base.to_string(), inline_ref.map(String::from))
-        } else {
-            (rest.to_string(), None)
-        }
-    }
-
-    fn extract_ref_from_git_url(rest: &str) -> (String, Option<String>) {
-        if let Some(qpos) = rest.find('?') {
-            let base = &rest[..qpos];
+            let mut base = &rest[..qpos];
+            if trim_trailing_slash {
+                base = base.trim_end_matches('/');
+            }
             let query = &rest[qpos + 1..];
             let inline_ref = query
                 .split('&')
@@ -215,10 +199,10 @@ impl FlakeInputRule {
 
             match segments.len() {
                 1 => {
-                    if let Some(value) = node.attr_value() {
-                        if value.kind() == rnix::SyntaxKind::NODE_ATTR_SET {
-                            Self::collect_from_attr_set(&value, &mut inputs);
-                        }
+                    if let Some(value) = node.attr_value()
+                        && value.kind() == rnix::SyntaxKind::NODE_ATTR_SET
+                    {
+                        Self::collect_from_attr_set(&value, &mut inputs);
                     }
                 }
                 2 => {
@@ -248,7 +232,7 @@ impl FlakeInputRule {
                                         name: input_name.clone(),
                                         url: Some(SourceValue {
                                             value: content,
-                                            range: (range.0, range.1),
+                                            range,
                                         }),
                                         ref_value: None,
                                         inline_ref: false,
@@ -263,37 +247,35 @@ impl FlakeInputRule {
                     let attr = segments[2].clone();
                     let pinned = node.has_pin_comment();
 
-                    if let Some(value_node) = node.attr_value() {
-                        if value_node.kind() == rnix::SyntaxKind::NODE_STRING {
-                            let range = value_node.text_range();
-                            if let Some(content) = value_node.string_content() {
-                                let sv = SourceValue {
-                                    value: content,
-                                    range: (range.0, range.1),
-                                };
-                                let def =
-                                    inputs
-                                        .entry(input_name.clone())
-                                        .or_insert_with(|| InputDef {
-                                            name: input_name.clone(),
-                                            url: None,
-                                            ref_value: None,
-                                            inline_ref: false,
-                                            pinned,
-                                        });
+                    if let Some(value_node) = node.attr_value()
+                        && value_node.kind() == rnix::SyntaxKind::NODE_STRING
+                    {
+                        let range = value_node.text_range();
+                        if let Some(content) = value_node.string_content() {
+                            let sv = SourceValue {
+                                value: content,
+                                range,
+                            };
+                            let def =
+                                inputs
+                                    .entry(input_name.clone())
+                                    .or_insert_with(|| InputDef {
+                                        name: input_name.clone(),
+                                        url: None,
+                                        ref_value: None,
+                                        inline_ref: false,
+                                        pinned,
+                                    });
 
-                                if attr == "url" {
-                                    def.url = Some(sv);
-                                } else if attr == "ref" {
-                                    def.ref_value = Some(sv);
-                                }
+                            if attr == "url" {
+                                def.url = Some(sv);
+                            } else if attr == "ref" {
+                                def.ref_value = Some(sv);
                             }
                         }
                     }
-                    if pinned {
-                        if let Some(def) = inputs.get_mut(&input_name) {
-                            def.pinned = true;
-                        }
+                    if pinned && let Some(def) = inputs.get_mut(&input_name) {
+                        def.pinned = true;
                     }
                 }
                 _ => {}
@@ -303,18 +285,16 @@ impl FlakeInputRule {
         let mut result = inputs.into_values().collect::<Vec<_>>();
 
         for def in &mut result {
-            if def.ref_value.is_none() {
-                if let Some(url) = &def.url {
-                    if let Some(parsed) = Self::parse_flake_url(&url.value) {
-                        if let Some(inline_ref) = parsed.inline_ref {
-                            def.inline_ref = true;
-                            def.ref_value = Some(SourceValue {
-                                value: inline_ref,
-                                range: url.range,
-                            });
-                        }
-                    }
-                }
+            if def.ref_value.is_none()
+                && let Some(url) = &def.url
+                && let Some(parsed) = Self::parse_flake_url(&url.value)
+                && let Some(inline_ref) = parsed.inline_ref
+            {
+                def.inline_ref = true;
+                def.ref_value = Some(SourceValue {
+                    value: inline_ref,
+                    range: url.range,
+                });
             }
         }
 
@@ -360,7 +340,7 @@ impl FlakeInputRule {
                                     name: input_name.clone(),
                                     url: Some(SourceValue {
                                         value: content,
-                                        range: (range.0, range.1),
+                                        range,
                                     }),
                                     ref_value: None,
                                     inline_ref: false,
@@ -373,37 +353,34 @@ impl FlakeInputRule {
                 let attr = segments[1].clone();
                 let pinned = entry.has_pin_comment();
 
-                if let Some(value_node) = entry.attr_value() {
-                    if value_node.kind() == rnix::SyntaxKind::NODE_STRING {
-                        let range = value_node.text_range();
-                        if let Some(content) = value_node.string_content() {
-                            let sv = SourceValue {
-                                value: content,
-                                range: (range.0, range.1),
-                            };
-                            let def =
-                                inputs
-                                    .entry(input_name.clone())
-                                    .or_insert_with(|| InputDef {
-                                        name: input_name.clone(),
-                                        url: None,
-                                        ref_value: None,
-                                        inline_ref: false,
-                                        pinned,
-                                    });
+                if let Some(value_node) = entry.attr_value()
+                    && value_node.kind() == rnix::SyntaxKind::NODE_STRING
+                {
+                    let range = value_node.text_range();
+                    if let Some(content) = value_node.string_content() {
+                        let sv = SourceValue {
+                            value: content,
+                            range,
+                        };
+                        let def = inputs
+                            .entry(input_name.clone())
+                            .or_insert_with(|| InputDef {
+                                name: input_name.clone(),
+                                url: None,
+                                ref_value: None,
+                                inline_ref: false,
+                                pinned,
+                            });
 
-                            if attr == "url" {
-                                def.url = Some(sv);
-                            } else if attr == "ref" {
-                                def.ref_value = Some(sv);
-                            }
+                        if attr == "url" {
+                            def.url = Some(sv);
+                        } else if attr == "ref" {
+                            def.ref_value = Some(sv);
                         }
                     }
                 }
-                if pinned {
-                    if let Some(def) = inputs.get_mut(&input_name) {
-                        def.pinned = true;
-                    }
+                if pinned && let Some(def) = inputs.get_mut(&input_name) {
+                    def.pinned = true;
                 }
             }
         }
@@ -415,7 +392,7 @@ impl FlakeInputRule {
         let range = node.text_range();
         Some(SourceValue {
             value: content,
-            range: (range.0, range.1),
+            range,
         })
     }
 }
@@ -474,26 +451,25 @@ impl UpdateRule for FlakeInputRule {
                 None => continue,
             };
 
-            if let Ok(Some(latest_tag)) = GitFetcher::get_latest_tag(&remote_url) {
-                if VersionDetector::compare(&ref_sv.value, &latest_tag) == std::cmp::Ordering::Less
-                {
-                    if input_def.inline_ref {
-                        if let Some(new_url) = Self::reconstruct_url(&url_sv.value, &latest_tag) {
-                            updates.push(Update::new(
-                                format!("inputs.{}.url", input_def.name),
-                                url_sv.value.clone(),
-                                new_url,
-                                url_sv.range,
-                            ));
-                        }
-                    } else {
+            if let Ok(Some(latest_tag)) = GitFetcher::get_latest_tag(&remote_url)
+                && VersionDetector::compare(&ref_sv.value, &latest_tag) == std::cmp::Ordering::Less
+            {
+                if input_def.inline_ref {
+                    if let Some(new_url) = Self::reconstruct_url(&url_sv.value, &latest_tag) {
                         updates.push(Update::new(
-                            format!("inputs.{}.ref", input_def.name),
-                            ref_sv.value.clone(),
-                            latest_tag,
-                            ref_sv.range,
+                            format!("inputs.{}.url", input_def.name),
+                            url_sv.value.clone(),
+                            new_url,
+                            url_sv.range,
                         ));
                     }
+                } else {
+                    updates.push(Update::new(
+                        format!("inputs.{}.ref", input_def.name),
+                        ref_sv.value.clone(),
+                        latest_tag,
+                        ref_sv.range,
+                    ));
                 }
             }
         }
@@ -618,6 +594,15 @@ mod tests {
             panic!("Expected SourceHut");
         }
         assert_eq!(result.inline_ref.as_deref(), Some("v2.0"));
+    }
+
+    #[test]
+    fn test_gitlocal_to_remote_url() {
+        let result = FlakeInputRule::parse_flake_url("git+file:///tmp/repo");
+        assert!(result.is_some());
+        if let Some(parsed) = result {
+            assert!(parsed.flake_url.to_remote_url().is_some());
+        }
     }
 
     #[test]

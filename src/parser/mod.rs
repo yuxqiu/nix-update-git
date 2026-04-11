@@ -1,3 +1,3 @@
 mod ast;
 
-pub use ast::{Location, NixError, NixFile, NixNode, NixNodeIterator};
+pub use ast::{NixError, NixFile, NixNode, NixNodeIterator, TextRange};
