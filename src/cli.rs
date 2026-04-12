@@ -2,7 +2,7 @@ use clap::Parser;
 
 #[derive(Parser, Debug)]
 #[command(name = "nix-update-git")]
-#[command(version = "0.1.0")]
+#[command(version = concat!(env!("CARGO_PKG_VERSION"), "-", env!("GIT_HASH")))]
 #[command(about = "Update git references in Nix flake files and Nix expressions")]
 pub struct Cli {
     #[arg(value_hint = clap::ValueHint::FilePath)]
@@ -16,4 +16,7 @@ pub struct Cli {
 
     #[arg(short, long, help = "Confirm each update")]
     pub interactive: bool,
+
+    #[arg(short, long, help = "Enable verbose output")]
+    pub verbose: bool,
 }

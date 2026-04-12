@@ -8,7 +8,7 @@
   outputs =
     { self, nixpkgs }:
     let
-      cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
+      cargoToml = fromTOML (builtins.readFile ./Cargo.toml);
       supportedSystems = [
         "x86_64-linux"
         "aarch64-linux"
@@ -25,11 +25,13 @@
           pkgs = pkgsFor system;
         in
         {
-          nix-update-git = pkgs.rustPlatform.buildRustPackage rec {
+          nix-update-git = pkgs.rustPlatform.buildRustPackage {
             pname = cargoToml.package.name;
             version = cargoToml.package.version;
             src = pkgs.lib.cleanSource self;
             cargoLock.lockFile = ./Cargo.lock;
+
+            NIX_UPDATE_GIT_HASH = self.shortRev or "unknown";
 
             nativeBuildInputs = with pkgs; [ pkg-config ];
             buildInputs =

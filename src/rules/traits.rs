@@ -4,23 +4,18 @@ use anyhow::Result;
 #[derive(Debug, Clone)]
 pub struct Update {
     pub field: String,
-    pub old_value: String,
-    pub new_value: String,
+    pub replacement: String,
     pub range: TextRange,
+    pub rule_name: String,
 }
 
 impl Update {
-    pub fn new(
-        field: impl Into<String>,
-        old_value: impl Into<String>,
-        new_value: impl Into<String>,
-        range: TextRange,
-    ) -> Self {
+    pub fn new(field: impl Into<String>, replacement: impl Into<String>, range: TextRange) -> Self {
         Self {
             field: field.into(),
-            old_value: old_value.into(),
-            new_value: new_value.into(),
+            replacement: replacement.into(),
             range,
+            rule_name: String::new(),
         }
     }
 }
@@ -48,10 +43,14 @@ impl RuleRegistry {
         let mut results = Vec::new();
         for rule in &self.rules {
             if rule.matches(node)
-                && let Some(updates) = rule.check(node)?
+                && let Some(mut updates) = rule.check(node)?
                 && !updates.is_empty()
             {
-                results.push((rule.name().to_string(), updates));
+                let rule_name = rule.name().to_string();
+                for update in &mut updates {
+                    update.rule_name = rule_name.clone();
+                }
+                results.push((rule_name, updates));
             }
         }
         Ok(results)

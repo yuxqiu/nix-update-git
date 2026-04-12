@@ -48,7 +48,7 @@ fn test_flake_input_no_ref() {
     fs::write(&flake_path, flake_content).unwrap();
 
     let mut cmd = Command::cargo_bin("nix-update-git").unwrap();
-    cmd.arg(flake_path.to_str().unwrap());
+    cmd.arg("--verbose").arg(flake_path.to_str().unwrap());
     cmd.assert()
         .success()
         .stdout(predicates::str::contains("No updates found"));
@@ -71,7 +71,7 @@ fn test_flake_input_with_non_version_ref() {
     fs::write(&flake_path, flake_content).unwrap();
 
     let mut cmd = Command::cargo_bin("nix-update-git").unwrap();
-    cmd.arg(flake_path.to_str().unwrap());
+    cmd.arg("--verbose").arg(flake_path.to_str().unwrap());
     cmd.assert()
         .success()
         .stdout(predicates::str::contains("No updates found"));
@@ -85,7 +85,7 @@ fn test_non_flake_file() {
     fs::write(&nix_path, nix_content).unwrap();
 
     let mut cmd = Command::cargo_bin("nix-update-git").unwrap();
-    cmd.arg(nix_path.to_str().unwrap());
+    cmd.arg("--verbose").arg(nix_path.to_str().unwrap());
     cmd.assert()
         .success()
         .stdout(predicates::str::contains("No updates found"));
@@ -141,7 +141,7 @@ fn test_flake_input_pinned() {
     fs::write(&flake_path, flake_content).unwrap();
 
     let mut cmd = Command::cargo_bin("nix-update-git").unwrap();
-    cmd.arg(flake_path.to_str().unwrap());
+    cmd.arg("--verbose").arg(flake_path.to_str().unwrap());
     cmd.assert()
         .success()
         .stdout(predicates::str::contains("No updates found"));
@@ -164,7 +164,7 @@ fn test_flake_input_pinned_on_ref() {
     fs::write(&flake_path, flake_content).unwrap();
 
     let mut cmd = Command::cargo_bin("nix-update-git").unwrap();
-    cmd.arg(flake_path.to_str().unwrap());
+    cmd.arg("--verbose").arg(flake_path.to_str().unwrap());
     cmd.assert()
         .success()
         .stdout(predicates::str::contains("No updates found"));
@@ -283,7 +283,7 @@ fn test_flake_input_inline_ref_no_update() {
     fs::write(&flake_path, &flake_content).unwrap();
 
     let mut cmd = Command::cargo_bin("nix-update-git").unwrap();
-    cmd.arg(flake_path.to_str().unwrap());
+    cmd.arg("--verbose").arg(flake_path.to_str().unwrap());
     cmd.assert()
         .success()
         .stdout(predicates::str::contains("No updates found"));
@@ -305,7 +305,7 @@ fn test_flake_input_inline_ref_pinned() {
     fs::write(&flake_path, flake_content).unwrap();
 
     let mut cmd = Command::cargo_bin("nix-update-git").unwrap();
-    cmd.arg(flake_path.to_str().unwrap());
+    cmd.arg("--verbose").arg(flake_path.to_str().unwrap());
     cmd.assert()
         .success()
         .stdout(predicates::str::contains("No updates found"));

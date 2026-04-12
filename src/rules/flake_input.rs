@@ -458,16 +458,14 @@ impl UpdateRule for FlakeInputRule {
                     if let Some(new_url) = Self::reconstruct_url(&url_sv.value, &latest_tag) {
                         updates.push(Update::new(
                             format!("inputs.{}.url", input_def.name),
-                            url_sv.value.clone(),
-                            new_url,
+                            format!("\"{}\"", new_url),
                             url_sv.range,
                         ));
                     }
                 } else {
                     updates.push(Update::new(
                         format!("inputs.{}.ref", input_def.name),
-                        ref_sv.value.clone(),
-                        latest_tag,
+                        format!("\"{}\"", latest_tag),
                         ref_sv.range,
                     ));
                 }
