@@ -12,9 +12,11 @@ There is no separate typecheck or lint step — clippy covers it.
 
 ## Test suites
 
-Unit tests live in `src/**/tests` modules. Integration tests live in `tests/*.rs`.
+Unit tests live in `src/**/tests` modules. Integration tests live in `tests/rules/*.rs`.
 
-Several integration tests create temporary git repos using the `TestRepo` helper in `tests/common/mod.rs`. It disables GPG signing to avoid hanging.
+Snapshot tests use [insta](https://insta.rs/) and are defined in `tests/snapshot/`. See `docs/CONTRIBUTING_TESTS.md` for how to add new tests.
+
+Several integration tests create temporary git repos using the `TestRepo` helper in `tests/rules/common/mod.rs`. It disables GPG signing to avoid hanging.
 
 Network-dependent tests are gated behind the `network-tests` feature flag (`#[cfg(feature = "network-tests")]`). Running `cargo test` (default) skips them. To include network tests:
 
