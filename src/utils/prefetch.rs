@@ -11,17 +11,31 @@ pub struct PrefetchResult {
 pub struct NixPrefetcher;
 
 impl NixPrefetcher {
-    pub fn prefetch_git(url: &str, rev: &str) -> Result<PrefetchResult> {
+    fn prefetch_git_inner(
+        url: &str,
+        rev: &str,
+        extra_args: &[&str],
+        label: &str,
+    ) -> Result<PrefetchResult> {
+        let mut args = vec!["--url", url, "--rev", rev, "--quiet"];
+        args.extend(extra_args);
+
         let output = Command::new("nix-prefetch-git")
-            .args(["--url", url, "--rev", rev, "--quiet"])
+            .args(&args)
             .output()
-            .with_context(|| format!("Failed to execute nix-prefetch-git for {} @ {}", url, rev))?;
+            .with_context(|| {
+                format!(
+                    "Failed to execute nix-prefetch-git {}for {} @ {}",
+                    label, url, rev
+                )
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
             anyhow::bail!(
-                "nix-prefetch-git failed for {} @ {}: {}{}",
+                "nix-prefetch-git {}failed for {} @ {}: {}{}",
+                label,
                 url,
                 rev,
                 stderr.trim(),
@@ -37,35 +51,12 @@ impl NixPrefetcher {
         parse_prefetch_json(&stdout)
     }
 
+    pub fn prefetch_git(url: &str, rev: &str) -> Result<PrefetchResult> {
+        Self::prefetch_git_inner(url, rev, &[], "")
+    }
+
     pub fn prefetch_git_with_submodules(url: &str, rev: &str) -> Result<PrefetchResult> {
-        let output = Command::new("nix-prefetch-git")
-            .args(["--url", url, "--rev", rev, "--fetch-submodules", "--quiet"])
-            .output()
-            .with_context(|| {
-                format!(
-                    "Failed to execute nix-prefetch-git (with submodules) for {} @ {}",
-                    url, rev
-                )
-            })?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            anyhow::bail!(
-                "nix-prefetch-git with submodules failed for {} @ {}: {}{}",
-                url,
-                rev,
-                stderr.trim(),
-                if stdout.is_empty() {
-                    String::new()
-                } else {
-                    format!("\n{}", stdout.trim())
-                }
-            );
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        parse_prefetch_json(&stdout)
+        Self::prefetch_git_inner(url, rev, &["--fetch-submodules"], "(with submodules) ")
     }
 
     pub fn prefetch_archive(url: &str) -> Result<String> {

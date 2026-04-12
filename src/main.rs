@@ -117,7 +117,7 @@ fn process_file(
     let content = fs::read_to_string(file_path)?;
     let mut had_errors = false;
 
-    match NixFile::parse(file_path, &content) {
+    match NixFile::parse(&content) {
         Ok(nix_file) => {
             let root_node = nix_file.root_node();
 

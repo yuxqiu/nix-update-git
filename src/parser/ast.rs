@@ -1,5 +1,4 @@
 use rowan::ast::AstNode;
-use std::path::Path;
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -22,6 +21,33 @@ impl std::error::Error for NixError {}
 pub struct NixFile {
     root: rnix::Root,
     source: Arc<str>,
+}
+
+impl NixFile {
+    pub fn parse(content: &str) -> Result<Self, NixError> {
+        let parse_result = rnix::Root::parse(content);
+        if !parse_result.errors().is_empty() {
+            let error_msgs: Vec<String> = parse_result
+                .errors()
+                .iter()
+                .map(|e| e.to_string())
+                .collect();
+            return Err(NixError::ParseError(error_msgs.join(", ")));
+        }
+        let root = parse_result.tree();
+        Ok(Self {
+            root,
+            source: Arc::from(content),
+        })
+    }
+
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
+    pub fn root_node(&self) -> NixNode {
+        NixNode::new(self.root.syntax().clone(), self.source.clone())
+    }
 }
 
 fn collect_select_path(node: &rnix::SyntaxNode) -> Vec<String> {
@@ -61,47 +87,15 @@ fn collect_select_path(node: &rnix::SyntaxNode) -> Vec<String> {
     parts
 }
 
-impl NixFile {
-    pub fn parse(_path: &Path, content: &str) -> Result<Self, NixError> {
-        let parse_result = rnix::Root::parse(content);
-        if !parse_result.errors().is_empty() {
-            let error_msgs: Vec<String> = parse_result
-                .errors()
-                .iter()
-                .map(|e| e.to_string())
-                .collect();
-            return Err(NixError::ParseError(error_msgs.join(", ")));
-        }
-        let root = parse_result.tree();
-        Ok(Self {
-            root,
-            source: Arc::from(content),
-        })
-    }
-
-    pub fn source(&self) -> &str {
-        &self.source
-    }
-
-    pub fn root_node(&self) -> NixNode {
-        NixNode::new(
-            self.root.syntax().clone(),
-            Arc::from(Path::new("")),
-            self.source.clone(),
-        )
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct NixNode {
     node: rnix::SyntaxNode,
-    file: Arc<Path>,
     source: Arc<str>,
 }
 
 impl NixNode {
-    pub fn new(node: rnix::SyntaxNode, file: Arc<Path>, source: Arc<str>) -> Self {
-        Self { node, file, source }
+    pub fn new(node: rnix::SyntaxNode, source: Arc<str>) -> Self {
+        Self { node, source }
     }
 
     pub fn kind(&self) -> rnix::SyntaxKind {
@@ -115,7 +109,7 @@ impl NixNode {
     pub fn children(&self) -> Vec<NixNode> {
         self.node
             .children()
-            .map(|child| NixNode::new(child, self.file.clone(), self.source.clone()))
+            .map(|child| NixNode::new(child, self.source.clone()))
             .collect()
     }
 
@@ -178,7 +172,7 @@ impl NixNode {
         ];
         for child in self.node.children() {
             if value_kinds.contains(&child.kind()) {
-                return Some(NixNode::new(child, self.file.clone(), self.source.clone()));
+                return Some(NixNode::new(child, self.source.clone()));
             }
         }
         None

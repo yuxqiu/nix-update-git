@@ -141,62 +141,6 @@ impl FetcherKind {
         }
     }
 
-    #[allow(dead_code)]
-    fn archive_url(&self, params: &HashMap<String, String>, rev: &str) -> Option<String> {
-        match self {
-            Self::FetchFromGitHub => {
-                let owner = params.get("owner")?;
-                let repo = params.get("repo")?;
-                let base = params
-                    .get("githubBase")
-                    .map(|s| s.as_str())
-                    .unwrap_or("github.com");
-                Some(format!(
-                    "https://{}/{}/{}/archive/{}.tar.gz",
-                    base, owner, repo, rev
-                ))
-            }
-            Self::FetchFromGitLab => {
-                let owner = params.get("owner")?;
-                let repo = params.get("repo")?;
-                let domain = params
-                    .get("domain")
-                    .map(|s| s.as_str())
-                    .unwrap_or("gitlab.com");
-                Some(format!(
-                    "https://{}/{}/{}/-/archive/{}/{}.tar.gz",
-                    domain, owner, repo, rev, repo
-                ))
-            }
-            Self::FetchFromGitea | Self::FetchFromForgejo => {
-                let domain = params.get("domain")?;
-                let owner = params.get("owner")?;
-                let repo = params.get("repo")?;
-                Some(format!(
-                    "https://{}/api/v1/repos/{}/{}/archive/{}.tar.gz",
-                    domain, owner, repo, rev
-                ))
-            }
-            Self::FetchFromCodeberg => {
-                let owner = params.get("owner")?;
-                let repo = params.get("repo")?;
-                Some(format!(
-                    "https://codeberg.org/{}/{}/archive/{}.tar.gz",
-                    owner, repo, rev
-                ))
-            }
-            Self::FetchFromBitbucket => {
-                let owner = params.get("owner")?;
-                let repo = params.get("repo")?;
-                Some(format!(
-                    "https://bitbucket.org/{}/{}/get/{}.tar.gz",
-                    owner, repo, rev
-                ))
-            }
-            _ => None,
-        }
-    }
-
     fn uses_fetch_submodules(&self, params: &HashMap<String, String>) -> bool {
         match self {
             Self::FetchFromGitHub
@@ -628,17 +572,6 @@ mod tests {
         params.insert("repo".to_string(), "testrepo".to_string());
         let url = FetcherKind::FetchFromRepoOrCz.git_url(&params).unwrap();
         assert_eq!(url, "https://repo.or.cz/testrepo.git");
-    }
-
-    #[test]
-    fn test_fetcher_archive_url_github() {
-        let mut params = HashMap::new();
-        params.insert("owner".to_string(), "user".to_string());
-        params.insert("repo".to_string(), "proj".to_string());
-        let url = FetcherKind::FetchFromGitHub
-            .archive_url(&params, "v1.0.0")
-            .unwrap();
-        assert_eq!(url, "https://github.com/user/proj/archive/v1.0.0.tar.gz");
     }
 
     #[test]

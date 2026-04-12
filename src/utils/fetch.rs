@@ -11,6 +11,21 @@ pub enum RefType {
     Heads,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RefKind {
+    Tag,
+    Branch,
+    Other,
+}
+
+#[derive(Debug, Clone)]
+pub struct GitRef {
+    pub sha: String,
+    pub kind: RefKind,
+    pub name: String,
+    pub full_ref: String,
+}
+
 impl GitFetcher {
     pub fn list_refs(url: &str, ref_types: &[RefType]) -> Result<Vec<GitRef>> {
         let mut args = vec!["ls-remote".to_string()];
@@ -47,20 +62,20 @@ impl GitFetcher {
                 let full_ref = full_ref.to_string();
                 let (kind, name) = if full_ref.starts_with("refs/tags/") {
                     (
-                        "tag",
+                        RefKind::Tag,
                         full_ref.strip_prefix("refs/tags/").unwrap().to_string(),
                     )
                 } else if full_ref.starts_with("refs/heads/") {
                     (
-                        "branch",
+                        RefKind::Branch,
                         full_ref.strip_prefix("refs/heads/").unwrap().to_string(),
                     )
                 } else {
-                    ("other", full_ref.clone())
+                    (RefKind::Other, full_ref.clone())
                 };
                 refs.push(GitRef {
                     sha: sha.to_string(),
-                    kind: kind.to_string(),
+                    kind,
                     name,
                     full_ref,
                 });
@@ -72,7 +87,7 @@ impl GitFetcher {
 
     pub fn get_latest_tag(url: &str) -> Result<Option<String>> {
         let refs = Self::list_refs(url, &[RefType::Tags])?;
-        let tags: Vec<&GitRef> = refs.iter().filter(|r| r.kind == "tag").collect();
+        let tags: Vec<&GitRef> = refs.iter().filter(|r| r.kind == RefKind::Tag).collect();
 
         if tags.is_empty() {
             return Ok(None);
@@ -84,21 +99,17 @@ impl GitFetcher {
 
     pub fn get_latest_commit(url: &str, branch: &str) -> Result<Option<String>> {
         let refs = Self::list_refs(url, &[RefType::Heads])?;
-        let branch_ref = refs.iter().find(|r| r.kind == "branch" && r.name == branch);
+        let branch_ref = refs
+            .iter()
+            .find(|r| r.kind == RefKind::Branch && r.name == branch);
         Ok(branch_ref.map(|r| r.sha.clone()))
     }
 
     pub fn resolve_ref_to_sha(url: &str, tag: &str) -> Result<Option<String>> {
         let refs = Self::list_refs(url, &[RefType::Tags])?;
-        let tag_ref = refs.iter().find(|r| r.kind == "tag" && r.name == tag);
+        let tag_ref = refs
+            .iter()
+            .find(|r| r.kind == RefKind::Tag && r.name == tag);
         Ok(tag_ref.map(|r| r.sha.clone()))
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct GitRef {
-    pub sha: String,
-    pub kind: String,
-    pub name: String,
-    pub full_ref: String,
 }
