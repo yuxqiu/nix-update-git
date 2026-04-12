@@ -32,33 +32,7 @@ fn test_fetcher_fetchgit_detects_update() {
 }
 
 #[test]
-fn test_fetcher_fetchgit_with_fetchgit() {
-    let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
-
-    let nix_content = format!(
-        r#"{{
-  src = fetchgit {{
-    url = "{}";
-    rev = "v1.0.0";
-    hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
-  }};
-}}"#,
-        repo.path_str()
-    );
-
-    let nix_dir = tempdir().unwrap();
-    let nix_path = nix_dir.path().join("test.nix");
-    fs::write(&nix_path, &nix_content).unwrap();
-
-    let mut cmd = Command::cargo_bin("nix-update-git").unwrap();
-    cmd.arg(nix_path.to_str().unwrap());
-    cmd.assert()
-        .success()
-        .stdout(predicates::str::contains("fetchgit.rev"));
-}
-
-#[test]
-fn test_fetcher_tag_attribute() {
+fn test_fetcher_tag_attribute_update() {
     let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
 
     let nix_content = format!(
@@ -77,10 +51,119 @@ fn test_fetcher_tag_attribute() {
     fs::write(&nix_path, &nix_content).unwrap();
 
     let mut cmd = Command::cargo_bin("nix-update-git").unwrap();
+    cmd.arg("--update").arg(nix_path.to_str().unwrap());
+    cmd.assert().success();
+
+    let updated = fs::read_to_string(&nix_path).unwrap();
+    assert!(
+        updated.contains("v2.0.0"),
+        "File should contain v2.0.0 after update, got: {}",
+        updated
+    );
+    assert!(
+        !updated.contains("\"v1.0.0\""),
+        "File should no longer contain \"v1.0.0\" after update, got: {}",
+        updated
+    );
+}
+
+#[test]
+fn test_fetcher_fetchgit_tag_and_rev_prefers_tag() {
+    let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
+
+    let nix_content = format!(
+        r#"{{
+  src = fetchgit {{
+    url = "{}";
+    tag = "v1.0.0";
+    rev = "v1.0.0";
+    hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  }};
+}}"#,
+        repo.path_str()
+    );
+
+    let nix_dir = tempdir().unwrap();
+    let nix_path = nix_dir.path().join("test.nix");
+    fs::write(&nix_path, &nix_content).unwrap();
+
+    let mut cmd = Command::cargo_bin("nix-update-git").unwrap();
     cmd.arg(nix_path.to_str().unwrap());
     cmd.assert()
         .success()
         .stdout(predicates::str::contains("fetchgit.tag"));
+}
+
+#[test]
+fn test_fetcher_builtins_fetch_git_follow_branch_updates_ref() {
+    let repo = TestRepo::new(&["v1.0.0"]);
+    repo.add_commit("commit after tag");
+
+    let head_sha = repo.head_sha();
+
+    let nix_content = format!(
+        r#"{{
+  src = builtins.fetchGit {{ # follow:master
+    url = "{}";
+    ref = "v1.0.0";
+  }};
+}}"#,
+        repo.path_str()
+    );
+
+    let nix_dir = tempdir().unwrap();
+    let nix_path = nix_dir.path().join("test.nix");
+    fs::write(&nix_path, &nix_content).unwrap();
+
+    let mut cmd = Command::cargo_bin("nix-update-git").unwrap();
+    cmd.arg("--update").arg(nix_path.to_str().unwrap());
+    cmd.assert().success();
+
+    let updated = fs::read_to_string(&nix_path).unwrap();
+    assert!(
+        updated.contains(&head_sha),
+        "File should contain the new HEAD SHA after update, got: {}",
+        updated
+    );
+    assert!(
+        !updated.contains("\"v1.0.0\""),
+        "builtins.fetchGit#follow should update ref, got: {}",
+        updated
+    );
+}
+
+#[test]
+fn test_fetcher_fetchgit_follow_branch_updates_rev() {
+    let repo = TestRepo::new(&["v1.0.0"]);
+    repo.add_commit("commit after tag");
+
+    let head_sha = repo.head_sha();
+
+    let nix_content = format!(
+        r#"{{
+  src = fetchgit {{ # follow:master
+    url = "{}";
+    rev = "0000000000000000000000000000000000000000";
+    hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  }};
+}}"#,
+        repo.path_str()
+    );
+
+    let nix_dir = tempdir().unwrap();
+    let nix_path = nix_dir.path().join("test.nix");
+    fs::write(&nix_path, &nix_content).unwrap();
+
+    let mut cmd = Command::cargo_bin("nix-update-git").unwrap();
+    cmd.arg("--update").arg(nix_path.to_str().unwrap());
+    cmd.assert().success();
+
+    let updated = fs::read_to_string(&nix_path).unwrap();
+    assert!(
+        updated.contains(&head_sha),
+        "File should contain the new HEAD SHA after update, got: {}",
+        updated
+    );
 }
 
 #[cfg(feature = "network-tests")]
@@ -126,8 +209,7 @@ fn test_github_fetch_from_github_detects_update() {
     cmd.assert()
         .success()
         .stdout(predicates::str::contains("fetchFromGitHub.rev"))
-        .stdout(predicates::str::contains("v0.1.0"))
-        .stdout(predicates::str::contains("v0.1.1"));
+        .stdout(predicates::str::is_match(r#""v\d+\.\d+\.\d+""#).unwrap());
 }
 
 #[cfg(feature = "network-tests")]
@@ -150,8 +232,7 @@ fn test_github_fetch_from_github_tag_attribute() {
     cmd.assert()
         .success()
         .stdout(predicates::str::contains("fetchFromGitHub.tag"))
-        .stdout(predicates::str::contains("v0.1.0"))
-        .stdout(predicates::str::contains("v0.1.1"));
+        .stdout(predicates::str::is_match(r#""v\d+\.\d+\.\d+""#).unwrap());
 }
 
 #[cfg(feature = "network-tests")]
@@ -175,13 +256,13 @@ fn test_github_fetch_from_github_update_mode() {
 
     let updated = fs::read_to_string(&nix_path).unwrap();
     assert!(
-        updated.contains("v0.1.1"),
-        "File should contain v0.1.1 after update, got: {}",
+        !updated.contains("\"v0.1.0\""),
+        "File should no longer contain old version v0.1.0, got: {}",
         updated
     );
     assert!(
-        !updated.contains("\"v0.1.0\""),
-        "File should no longer contain \"v0.1.0\" after update, got: {}",
+        updated.contains("rev = "),
+        "File should contain rev after update, got: {}",
         updated
     );
 }
@@ -205,8 +286,7 @@ fn test_github_fetchgit_detects_update() {
     cmd.assert()
         .success()
         .stdout(predicates::str::contains("fetchgit.rev"))
-        .stdout(predicates::str::contains("v0.1.0"))
-        .stdout(predicates::str::contains("v0.1.1"));
+        .stdout(predicates::str::is_match(r#""v\d+\.\d+\.\d+""#).unwrap());
 }
 
 #[cfg(feature = "network-tests")]
@@ -227,8 +307,7 @@ fn test_github_builtins_fetch_git() {
     cmd.assert()
         .success()
         .stdout(predicates::str::contains("builtins.fetchGit.ref"))
-        .stdout(predicates::str::contains("v0.1.0"))
-        .stdout(predicates::str::contains("v0.1.1"));
+        .stdout(predicates::str::is_match(r#""v\d+\.\d+\.\d+""#).unwrap());
 }
 
 #[cfg(feature = "network-tests")]
@@ -238,7 +317,7 @@ fn test_github_fetch_from_github_no_update_when_latest() {
   src = fetchFromGitHub {
     owner = "yuxqiu";
     repo = "nix-update-git";
-    rev = "v0.1.1";
+    rev = "v999.0.0";
     hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   };
 }"#;

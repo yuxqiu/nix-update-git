@@ -268,6 +268,16 @@ impl FetcherRule {
         }
     }
 
+    /// Resolve the latest commit on `branch` and produce an update for it.
+    ///
+    /// Disambiguates which attribute key to update based on what the call
+    /// already contains:
+    ///
+    /// - If `rev` key exists in the call → update `rev`.
+    /// - If `ref` key exists and the call is `builtins.fetchGit` → update `ref`
+    ///   (since `ref` is the standard attribute for branch names in
+    ///   `builtins.fetchGit`).
+    /// - Otherwise → update `rev` (the default for all other fetcher kinds).
     fn handle_branch_following(
         call: &FetcherCall,
         git_url: &str,
@@ -316,6 +326,18 @@ impl FetcherRule {
         Ok(())
     }
 
+    /// Find the latest version tag on `git_url` and produce an update if it's
+    /// newer than the current value.
+    ///
+    /// Attribute selection follows this priority:
+    ///
+    /// 1. `tag` — if present, update the `tag` attribute (used by
+    ///    `fetchFromGitHub` and similar fetchers that support a separate `tag`
+    ///    parameter).
+    /// 2. `rev` — if present and looks like a version (not a commit hash),
+    ///    update `rev`.
+    /// 3. `ref` — only for `builtins.fetchGit`, which uses `ref` for version
+    ///    tags instead of `rev`. Skip for other fetcher kinds.
     fn handle_version_update(
         call: &FetcherCall,
         git_url: &str,

@@ -33,11 +33,7 @@ Current integration tests (in `tests/`) cover the main flows but miss several pa
 
 ## 2. Architecture and rule improvements
 
-### 2.1 `fetchFromGitHub` with `tag` attribute
-
-Currently the fetcher rule only updates `rev` and `tag` if the current value looks like a version. But `fetchFromGitHub { ...; tag = "v1.0.0"; ... }` is a legitimate pattern where `tag` is a separate attribute that should be updated. Already partially handled — verify it works end-to-end with integration tests.
-
-### 2.2 `nix-prefetch-git` fallback strategy
+### 2.1 `nix-prefetch-git` fallback strategy
 
 If `nix-prefetch-git` is not available, the tool currently just prints a warning and skips hash updates. Consider:
 
@@ -56,16 +52,6 @@ pkgs.fetchFromGitHub {
   # hash = "sha256-LPDiiEPOZu5Ah5vCLyCMT3w1uoBhUjyqoPWCOiLVLnw=";
 }
 ```
-
-### 2.3 `ref` vs `rev` disambiguation
-
-The `handle_branch_following` method currently picks between `"rev"` and `"ref"` keys with a somewhat ad-hoc heuristic. The logic should be:
-
-- If `rev` key exists in the call → update `rev`
-- If `ref` key exists in the call → update `ref`
-- For `builtins.fetchGit`, prefer `ref` (since `ref` is the standard attribute for branch names)
-
-This is already what the code does, but it should be clearly documented in comments.
 
 ## 3. Performance
 
