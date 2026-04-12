@@ -5,10 +5,30 @@ use super::version::VersionDetector;
 
 pub struct GitFetcher;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefType {
+    Tags,
+    Heads,
+}
+
 impl GitFetcher {
-    pub fn list_refs(url: &str) -> Result<Vec<GitRef>> {
+    pub fn list_refs(url: &str, ref_types: &[RefType]) -> Result<Vec<GitRef>> {
+        let mut args = vec!["ls-remote".to_string()];
+        for rt in ref_types {
+            match rt {
+                RefType::Tags => {
+                    args.push("--tags".to_string());
+                    args.push("--refs".to_string());
+                }
+                RefType::Heads => {
+                    args.push("--heads".to_string());
+                }
+            }
+        }
+        args.push(url.to_string());
+
         let output = Command::new("git")
-            .args(["ls-remote", "--tags", "--refs", url])
+            .args(&args)
             .output()
             .with_context(|| format!("Failed to execute git ls-remote for {}", url))?;
 
@@ -51,7 +71,7 @@ impl GitFetcher {
     }
 
     pub fn get_latest_tag(url: &str) -> Result<Option<String>> {
-        let refs = Self::list_refs(url)?;
+        let refs = Self::list_refs(url, &[RefType::Tags])?;
         let tags: Vec<&GitRef> = refs.iter().filter(|r| r.kind == "tag").collect();
 
         if tags.is_empty() {
@@ -60,6 +80,18 @@ impl GitFetcher {
 
         let tag_names: Vec<&str> = tags.iter().map(|t| t.name.as_str()).collect();
         Ok(VersionDetector::latest(&tag_names).map(|s| s.to_string()))
+    }
+
+    pub fn get_latest_commit(url: &str, branch: &str) -> Result<Option<String>> {
+        let refs = Self::list_refs(url, &[RefType::Heads])?;
+        let branch_ref = refs.iter().find(|r| r.kind == "branch" && r.name == branch);
+        Ok(branch_ref.map(|r| r.sha.clone()))
+    }
+
+    pub fn resolve_ref_to_sha(url: &str, tag: &str) -> Result<Option<String>> {
+        let refs = Self::list_refs(url, &[RefType::Tags])?;
+        let tag_ref = refs.iter().find(|r| r.kind == "tag" && r.name == tag);
+        Ok(tag_ref.map(|r| r.sha.clone()))
     }
 }
 

@@ -24,6 +24,43 @@ pub struct NixFile {
     source: Arc<str>,
 }
 
+fn collect_select_path(node: &rnix::SyntaxNode) -> Vec<String> {
+    let mut parts = Vec::new();
+
+    fn collect_from_attrpath(node: &rnix::SyntaxNode, parts: &mut Vec<String>) {
+        for child in node.children() {
+            if child.kind() == rnix::SyntaxKind::NODE_IDENT {
+                parts.push(child.text().to_string().trim().to_string());
+            } else if child.kind() == rnix::SyntaxKind::NODE_SELECT {
+                collect_select_parts(&child, parts);
+            }
+        }
+    }
+
+    fn collect_select_parts(node: &rnix::SyntaxNode, parts: &mut Vec<String>) {
+        let children: Vec<_> = node.children().collect();
+        if children.len() >= 2 {
+            let first = &children[0];
+            let last = &children[children.len() - 1];
+
+            if first.kind() == rnix::SyntaxKind::NODE_SELECT {
+                collect_select_parts(first, parts);
+            } else if first.kind() == rnix::SyntaxKind::NODE_IDENT {
+                parts.push(first.text().to_string().trim().to_string());
+            }
+
+            if last.kind() == rnix::SyntaxKind::NODE_ATTRPATH {
+                collect_from_attrpath(last, parts);
+            } else if last.kind() == rnix::SyntaxKind::NODE_IDENT {
+                parts.push(last.text().to_string().trim().to_string());
+            }
+        }
+    }
+
+    collect_select_parts(node, &mut parts);
+    parts
+}
+
 impl NixFile {
     pub fn parse(_path: &Path, content: &str) -> Result<Self, NixError> {
         let parse_result = rnix::Root::parse(content);
@@ -195,6 +232,64 @@ impl NixNode {
         let value = entry.attr_value()?;
         if value.kind() == rnix::SyntaxKind::NODE_STRING {
             Some(value)
+        } else {
+            None
+        }
+    }
+
+    pub fn follow_branch_comment(&self) -> Option<String> {
+        for element in self.node.children_with_tokens() {
+            if let rowan::NodeOrToken::Token(t) = element
+                && t.kind() == rnix::SyntaxKind::TOKEN_COMMENT
+            {
+                let text = t.text().trim();
+                let content = text.trim_start_matches('#').trim();
+                if let Some(branch) = content.strip_prefix("follow:") {
+                    return Some(branch.trim().to_string());
+                }
+            }
+        }
+        None
+    }
+
+    pub fn apply_function_name(&self) -> Option<String> {
+        if self.kind() != rnix::SyntaxKind::NODE_APPLY {
+            return None;
+        }
+        for child in self.children() {
+            if child.kind() == rnix::SyntaxKind::NODE_IDENT {
+                return Some(child.text().trim().to_string());
+            }
+            if child.kind() == rnix::SyntaxKind::NODE_SELECT {
+                let parts = collect_select_path(&child.node);
+                if !parts.is_empty() {
+                    return Some(parts.join("."));
+                }
+            }
+        }
+        None
+    }
+
+    pub fn apply_argument(&self) -> Option<NixNode> {
+        if self.kind() != rnix::SyntaxKind::NODE_APPLY {
+            return None;
+        }
+        self.children()
+            .into_iter()
+            .find(|child| child.kind() == rnix::SyntaxKind::NODE_ATTR_SET)
+    }
+
+    pub fn find_bool_value(&self, key: &str) -> Option<bool> {
+        let entry = self.find_attr_by_key(key)?;
+        let value = entry.attr_value()?;
+        if value.kind() == rnix::SyntaxKind::NODE_IDENT {
+            let text = value.text();
+            let trimmed = text.trim();
+            match trimmed {
+                "true" => Some(true),
+                "false" => Some(false),
+                _ => None,
+            }
         } else {
             None
         }

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use nix_update_git::parser::NixFile;
-use nix_update_git::rules::{FlakeInputRule, RuleRegistry, Update};
+use nix_update_git::rules::{FetcherRule, FlakeInputRule, RuleRegistry, Update};
 use std::fs;
 use std::io::{self, Write};
 
@@ -202,6 +202,7 @@ fn main() -> Result<()> {
 
     let mut registry = RuleRegistry::new();
     registry.register(FlakeInputRule::new());
+    registry.register(FetcherRule::new());
 
     let mut all_ok = true;
     for file_path in &cli.files {
