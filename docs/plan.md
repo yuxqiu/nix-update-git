@@ -31,13 +31,6 @@ Current integration tests (in `tests/`) cover the main flows but miss several pa
 - **Overlapping update ranges**: the `apply_updates` logic in `main.rs` that detects subrange overlaps should have a direct test.
 - **`# pin` on inner attributes**: e.g., `rev = "v1.0.0"; # pin` — confirm pin detection on non-outermost nodes.
 
-### 1.4 Hermetic test infrastructure
-
-Current integration tests rely on `git init` + `git tag` in temp directories, which is good. Some tests hit the real network (e.g., `test_github_fetch_from_github_detects_update` queries `github.com/yuxqiu/nix-update-git` tags). Consider:
-
-- Making network-dependent tests opt-in (e.g., `#[cfg(feature = "network-tests")]`) so `cargo test` works offline.
-- Creating a more systematic `TestRepo` builder that sets up known tag structures, branches, and commits.
-
 ## 2. Architecture and rule improvements
 
 ### 2.1 `fetchFromGitHub` with `tag` attribute
@@ -70,6 +63,18 @@ If `nix-prefetch-git` is not available, the tool currently just prints a warning
 - Auto-detecting availability at startup and informing the user.
 - Providing a `--no-prefetch` flag to explicitly skip hash prefetching (useful in CI where `nix-prefetch-git` might not be installed).
 - Supporting `nix hash convert` as an alternative for SRI ↔ nix-base32 conversion.
+
+Besides that, `nix-prefetch-git` already exhibits some incompatibilities:
+
+```nix
+pkgs.fetchFromGitHub {
+  owner = "arkenfox";
+  repo = "user.js";
+  rev = "140.1";
+  hash = "sha256-TyH2YvWIwpIwFaEvU8ZaKLs7IC1NNAV1pDm/GW5bILs="; # wrong hash reported by nix-prefetch-git
+  # hash = "sha256-LPDiiEPOZu5Ah5vCLyCMT3w1uoBhUjyqoPWCOiLVLnw=";
+}
+```
 
 ### 2.4 `ref` vs `rev` disambiguation
 

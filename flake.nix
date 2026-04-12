@@ -40,29 +40,18 @@
 
               NIX_UPDATE_GIT_HASH = self.shortRev or "unknown";
 
-              nativeBuildInputs = with pkgs; [ makeWrapper ];
+              nativeBuildInputs = with pkgs; [
+                makeWrapper
+                git
+                nix-prefetch-git
+              ];
 
               postInstall = ''
                 wrapProgram $out/bin/nix-update-git \
                   --prefix PATH : ${pkgs.lib.makeBinPath runtimeDeps}
               '';
 
-              checkFlags = [
-                "--skip=test_update_mode_ref"
-                "--skip=test_update_mode_inline_ref"
-                "--skip=test_flake_input_detects_version_update"
-                "--skip=test_flake_input_dotted_form"
-                "--skip=test_flake_input_inline_ref_github"
-                "--skip=test_flake_input_inline_ref_bare_string"
-                "--skip=test_flake_input_inline_ref_no_update"
-                "--skip=test_github_fetch_from_github_detects_update"
-                "--skip=test_github_fetch_from_github_tag_attribute"
-                "--skip=test_github_fetch_from_github_update_mode"
-                "--skip=test_github_fetchgit_detects_update"
-                "--skip=test_github_builtins_fetch_git"
-                "--skip=test_github_fetch_from_github_no_update_when_latest"
-                "--skip=test_github_fetch_from_github_pinned"
-              ];
+              cargoTestFlags = [ "--no-default-features" ];
 
               meta = with pkgs.lib; {
                 description = "Update git references in Nix flake files and Nix expressions";

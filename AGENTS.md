@@ -14,16 +14,15 @@ There is no separate typecheck or lint step — clippy covers it.
 
 Unit tests live in `src/**/tests` modules. Integration tests live in `tests/*.rs`.
 
-Several integration tests create temporary git repos via shell commands. They must disable GPG signing to avoid hanging:
+Several integration tests create temporary git repos using the `TestRepo` helper in `tests/common/mod.rs`. It disables GPG signing to avoid hanging.
+
+Network-dependent tests are gated behind the `network-tests` feature flag (`#[cfg(feature = "network-tests")]`). Running `cargo test` (default) skips them. To include network tests:
 
 ```bash
-git config commit.gpgsign false
-git config tag.gpgsign false
+cargo test --features network-tests
 ```
 
-The `create_git_repo_with_tags` helper in `tests/flake_input_test.rs` handles this already, but keep it in mind if writing new git-dependent tests.
-
-Nix builds skip these tests (see `checkFlags` in `flake.nix`).
+Nix builds exclude network tests via `cargoTestFlags = [ "--no-default-features" ]` in `flake.nix`.
 
 ## Architecture
 

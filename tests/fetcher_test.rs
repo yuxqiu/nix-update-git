@@ -1,52 +1,14 @@
+mod common;
+
 use assert_cmd::Command;
+use common::TestRepo;
 use std::fs;
 use tempfile::tempdir;
 
-fn create_git_repo_with_tags(path: &std::path::Path, tags: &[&str]) {
-    let run_git = |args: &[&str]| -> std::process::Output {
-        std::process::Command::new("git")
-            .args(args)
-            .current_dir(path)
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .output()
-            .expect("failed to run git")
-    };
-
-    run_git(&["init"]);
-    run_git(&["config", "user.email", "test@test.com"]);
-    run_git(&["config", "user.name", "Test"]);
-    run_git(&["config", "commit.gpgsign", "false"]);
-    run_git(&["config", "tag.gpgsign", "false"]);
-
-    fs::write(path.join("README.md"), "init").unwrap();
-    run_git(&["add", "."]);
-    run_git(&["commit", "-m", "init"]);
-
-    for tag in tags {
-        fs::write(path.join("README.md"), format!("commit for {}", tag)).unwrap();
-        run_git(&["add", "."]);
-        let msg = format!("commit for {}", tag);
-        run_git(&["commit", "-m", &msg]);
-        run_git(&["tag", tag]);
-    }
-}
-
-fn get_head_sha(path: &std::path::Path) -> String {
-    let output = std::process::Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .current_dir(path)
-        .output()
-        .expect("failed to get HEAD sha");
-    String::from_utf8_lossy(&output.stdout).trim().to_string()
-}
-
 #[test]
 fn test_fetcher_fetchgit_detects_update() {
-    let repo_dir = tempdir().unwrap();
-    create_git_repo_with_tags(repo_dir.path(), &["v1.0.0", "v2.0.0"]);
+    let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
 
-    let repo_path = repo_dir.path().to_str().unwrap();
     let nix_content = format!(
         r#"{{
   src = fetchgit {{
@@ -55,7 +17,7 @@ fn test_fetcher_fetchgit_detects_update() {
     hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   }};
 }}"#,
-        repo_path
+        repo.path_str()
     );
 
     let nix_dir = tempdir().unwrap();
@@ -71,10 +33,8 @@ fn test_fetcher_fetchgit_detects_update() {
 
 #[test]
 fn test_fetcher_fetchgit_with_fetchgit() {
-    let repo_dir = tempdir().unwrap();
-    create_git_repo_with_tags(repo_dir.path(), &["v1.0.0", "v2.0.0"]);
+    let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
 
-    let repo_path = repo_dir.path().to_str().unwrap();
     let nix_content = format!(
         r#"{{
   src = fetchgit {{
@@ -83,7 +43,7 @@ fn test_fetcher_fetchgit_with_fetchgit() {
     hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   }};
 }}"#,
-        repo_path
+        repo.path_str()
     );
 
     let nix_dir = tempdir().unwrap();
@@ -99,10 +59,8 @@ fn test_fetcher_fetchgit_with_fetchgit() {
 
 #[test]
 fn test_fetcher_tag_attribute() {
-    let repo_dir = tempdir().unwrap();
-    create_git_repo_with_tags(repo_dir.path(), &["v1.0.0", "v2.0.0"]);
+    let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
 
-    let repo_path = repo_dir.path().to_str().unwrap();
     let nix_content = format!(
         r#"{{
   src = fetchgit {{
@@ -111,7 +69,7 @@ fn test_fetcher_tag_attribute() {
     hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   }};
 }}"#,
-        repo_path
+        repo.path_str()
     );
 
     let nix_dir = tempdir().unwrap();
@@ -125,6 +83,7 @@ fn test_fetcher_tag_attribute() {
         .stdout(predicates::str::contains("fetchgit.tag"));
 }
 
+#[cfg(feature = "network-tests")]
 #[test]
 fn test_github_fetch_from_github_two_component_version() {
     let nix_content = r#"{
@@ -147,6 +106,7 @@ fn test_github_fetch_from_github_two_component_version() {
         .stdout(predicates::str::contains("140.0"));
 }
 
+#[cfg(feature = "network-tests")]
 #[test]
 fn test_github_fetch_from_github_detects_update() {
     let nix_content = r#"{
@@ -170,6 +130,7 @@ fn test_github_fetch_from_github_detects_update() {
         .stdout(predicates::str::contains("v0.1.1"));
 }
 
+#[cfg(feature = "network-tests")]
 #[test]
 fn test_github_fetch_from_github_tag_attribute() {
     let nix_content = r#"{
@@ -193,6 +154,7 @@ fn test_github_fetch_from_github_tag_attribute() {
         .stdout(predicates::str::contains("v0.1.1"));
 }
 
+#[cfg(feature = "network-tests")]
 #[test]
 fn test_github_fetch_from_github_update_mode() {
     let nix_content = r#"{
@@ -224,6 +186,7 @@ fn test_github_fetch_from_github_update_mode() {
     );
 }
 
+#[cfg(feature = "network-tests")]
 #[test]
 fn test_github_fetchgit_detects_update() {
     let nix_content = r#"{
@@ -246,6 +209,7 @@ fn test_github_fetchgit_detects_update() {
         .stdout(predicates::str::contains("v0.1.1"));
 }
 
+#[cfg(feature = "network-tests")]
 #[test]
 fn test_github_builtins_fetch_git() {
     let nix_content = r#"{
@@ -267,6 +231,7 @@ fn test_github_builtins_fetch_git() {
         .stdout(predicates::str::contains("v0.1.1"));
 }
 
+#[cfg(feature = "network-tests")]
 #[test]
 fn test_github_fetch_from_github_no_update_when_latest() {
     let nix_content = r#"{
@@ -311,10 +276,8 @@ fn test_github_fetch_from_github_pinned() {
 
 #[test]
 fn test_fetcher_pinned() {
-    let repo_dir = tempdir().unwrap();
-    create_git_repo_with_tags(repo_dir.path(), &["v1.0.0", "v2.0.0"]);
+    let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
 
-    let repo_path = repo_dir.path().to_str().unwrap();
     let nix_content = format!(
         r#"{{
   src = fetchgit {{ # pin
@@ -323,7 +286,7 @@ fn test_fetcher_pinned() {
     hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   }};
 }}"#,
-        repo_path
+        repo.path_str()
     );
 
     let nix_dir = tempdir().unwrap();
@@ -339,11 +302,9 @@ fn test_fetcher_pinned() {
 
 #[test]
 fn test_fetcher_commit_hash_no_update() {
-    let repo_dir = tempdir().unwrap();
-    create_git_repo_with_tags(repo_dir.path(), &["v1.0.0"]);
-    let sha = get_head_sha(repo_dir.path());
+    let repo = TestRepo::new(&["v1.0.0"]);
+    let sha = repo.head_sha();
 
-    let repo_path = repo_dir.path().to_str().unwrap();
     let nix_content = format!(
         r#"{{
   src = fetchgit {{
@@ -352,7 +313,8 @@ fn test_fetcher_commit_hash_no_update() {
     hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   }};
 }}"#,
-        repo_path, sha
+        repo.path_str(),
+        sha
     );
 
     let nix_dir = tempdir().unwrap();
@@ -389,10 +351,8 @@ fn test_fetcher_non_version_ref_no_update() {
 
 #[test]
 fn test_fetcher_builtins_fetch_git() {
-    let repo_dir = tempdir().unwrap();
-    create_git_repo_with_tags(repo_dir.path(), &["v1.0.0", "v2.0.0"]);
+    let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
 
-    let repo_path = repo_dir.path().to_str().unwrap();
     let nix_content = format!(
         r#"{{
   src = builtins.fetchGit {{
@@ -400,7 +360,7 @@ fn test_fetcher_builtins_fetch_git() {
     ref = "v1.0.0";
   }};
 }}"#,
-        repo_path
+        repo.path_str()
     );
 
     let nix_dir = tempdir().unwrap();
@@ -416,10 +376,8 @@ fn test_fetcher_builtins_fetch_git() {
 
 #[test]
 fn test_fetcher_update_mode() {
-    let repo_dir = tempdir().unwrap();
-    create_git_repo_with_tags(repo_dir.path(), &["v1.0.0", "v2.0.0"]);
+    let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
 
-    let repo_path = repo_dir.path().to_str().unwrap();
     let nix_content = format!(
         r#"{{
   src = fetchgit {{
@@ -428,7 +386,7 @@ fn test_fetcher_update_mode() {
     hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   }};
 }}"#,
-        repo_path
+        repo.path_str()
     );
 
     let nix_dir = tempdir().unwrap();
@@ -449,10 +407,8 @@ fn test_fetcher_update_mode() {
 
 #[test]
 fn test_fetcher_sha256_attribute() {
-    let repo_dir = tempdir().unwrap();
-    create_git_repo_with_tags(repo_dir.path(), &["v1.0.0", "v2.0.0"]);
+    let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
 
-    let repo_path = repo_dir.path().to_str().unwrap();
     let nix_content = format!(
         r#"{{
   src = fetchgit {{
@@ -461,7 +417,7 @@ fn test_fetcher_sha256_attribute() {
     sha256 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
   }};
 }}"#,
-        repo_path
+        repo.path_str()
     );
 
     let nix_dir = tempdir().unwrap();
@@ -474,24 +430,9 @@ fn test_fetcher_sha256_attribute() {
 
 #[test]
 fn test_fetcher_follow_branch_comment() {
-    let repo_dir = tempdir().unwrap();
-    create_git_repo_with_tags(repo_dir.path(), &["v1.0.0"]);
+    let repo = TestRepo::new(&["v1.0.0"]);
+    repo.add_commit("new commit after tag");
 
-    let run_git = |args: &[&str]| -> std::process::Output {
-        std::process::Command::new("git")
-            .args(args)
-            .current_dir(repo_dir.path())
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .output()
-            .expect("failed to run git")
-    };
-
-    fs::write(repo_dir.path().join("README.md"), "new commit after tag").unwrap();
-    run_git(&["add", "."]);
-    run_git(&["commit", "-m", "new commit after tag"]);
-
-    let repo_path = repo_dir.path().to_str().unwrap();
     let old_sha = "0000000000000000000000000000000000000000";
 
     let nix_content = format!(
@@ -502,7 +443,8 @@ fn test_fetcher_follow_branch_comment() {
     hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   }};
 }}"#,
-        repo_path, old_sha
+        repo.path_str(),
+        old_sha
     );
 
     let nix_dir = tempdir().unwrap();
@@ -521,6 +463,7 @@ fn test_fetcher_follow_branch_comment() {
     );
 }
 
+#[cfg(feature = "network-tests")]
 #[test]
 fn test_fetcher_fetch_from_gitea() {
     let nix_content = r#"{
@@ -540,6 +483,7 @@ fn test_fetcher_fetch_from_gitea() {
     cmd.arg("--verbose").arg(nix_path.to_str().unwrap());
 }
 
+#[cfg(feature = "network-tests")]
 #[test]
 fn test_fetcher_fetch_from_sourcehut() {
     let nix_content = r#"{
@@ -558,6 +502,7 @@ fn test_fetcher_fetch_from_sourcehut() {
     cmd.arg("--verbose").arg(nix_path.to_str().unwrap());
 }
 
+#[cfg(feature = "network-tests")]
 #[test]
 fn test_fetcher_fetch_from_bitbucket() {
     let nix_content = r#"{
@@ -576,6 +521,7 @@ fn test_fetcher_fetch_from_bitbucket() {
     cmd.arg("--verbose").arg(nix_path.to_str().unwrap());
 }
 
+#[cfg(feature = "network-tests")]
 #[test]
 fn test_fetcher_fetch_from_codeberg() {
     let nix_content = r#"{
@@ -596,10 +542,8 @@ fn test_fetcher_fetch_from_codeberg() {
 
 #[test]
 fn test_fetcher_pkgs_dotted_name() {
-    let repo_dir = tempdir().unwrap();
-    create_git_repo_with_tags(repo_dir.path(), &["v1.0.0", "v2.0.0"]);
+    let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
 
-    let repo_path = repo_dir.path().to_str().unwrap();
     let nix_content = format!(
         r#"{{
   src = pkgs.fetchgit {{
@@ -608,7 +552,7 @@ fn test_fetcher_pkgs_dotted_name() {
     hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   }};
 }}"#,
-        repo_path
+        repo.path_str()
     );
 
     let nix_dir = tempdir().unwrap();
@@ -624,10 +568,8 @@ fn test_fetcher_pkgs_dotted_name() {
 
 #[test]
 fn test_fetcher_builtins_fetch_git_dotted() {
-    let repo_dir = tempdir().unwrap();
-    create_git_repo_with_tags(repo_dir.path(), &["v1.0.0", "v2.0.0"]);
+    let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
 
-    let repo_path = repo_dir.path().to_str().unwrap();
     let nix_content = format!(
         r#"{{
   src = builtins.fetchGit {{
@@ -635,7 +577,7 @@ fn test_fetcher_builtins_fetch_git_dotted() {
     ref = "v1.0.0";
   }};
 }}"#,
-        repo_path
+        repo.path_str()
     );
 
     let nix_dir = tempdir().unwrap();

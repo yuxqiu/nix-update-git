@@ -1,36 +1,9 @@
+mod common;
+
 use assert_cmd::Command;
+use common::TestRepo;
 use std::fs;
 use tempfile::tempdir;
-
-fn create_git_repo_with_tags(path: &std::path::Path, tags: &[&str]) {
-    let run_git = |args: &[&str]| -> std::process::Output {
-        std::process::Command::new("git")
-            .args(args)
-            .current_dir(path)
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .output()
-            .expect("failed to run git")
-    };
-
-    run_git(&["init"]);
-    run_git(&["config", "user.email", "test@test.com"]);
-    run_git(&["config", "user.name", "Test"]);
-    run_git(&["config", "commit.gpgsign", "false"]);
-    run_git(&["config", "tag.gpgsign", "false"]);
-
-    fs::write(path.join("README.md"), "init").unwrap();
-    run_git(&["add", "."]);
-    run_git(&["commit", "-m", "init"]);
-
-    for tag in tags {
-        fs::write(path.join("README.md"), format!("commit for {}", tag)).unwrap();
-        run_git(&["add", "."]);
-        let msg = format!("commit for {}", tag);
-        run_git(&["commit", "-m", &msg]);
-        run_git(&["tag", tag]);
-    }
-}
 
 #[test]
 fn test_flake_input_no_ref() {
@@ -93,11 +66,9 @@ fn test_non_flake_file() {
 
 #[test]
 fn test_flake_input_detects_version_update() {
-    let repo_dir = tempdir().unwrap();
-    create_git_repo_with_tags(repo_dir.path(), &["v1.0.0", "v2.0.0"]);
+    let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
 
     let flake_dir = tempdir().unwrap();
-    let repo_path = repo_dir.path().to_str().unwrap();
     let flake_content = format!(
         r#"{{
   inputs = {{
@@ -109,7 +80,7 @@ fn test_flake_input_detects_version_update() {
 
   outputs = {{ self, mylib }}: {{}};
 }}"#,
-        repo_path
+        repo.path_str()
     );
 
     let flake_path = flake_dir.path().join("flake.nix");
@@ -172,11 +143,9 @@ fn test_flake_input_pinned_on_ref() {
 
 #[test]
 fn test_flake_input_dotted_form() {
-    let repo_dir = tempdir().unwrap();
-    create_git_repo_with_tags(repo_dir.path(), &["v1.0.0", "v2.0.0"]);
+    let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
 
     let flake_dir = tempdir().unwrap();
-    let repo_path = repo_dir.path().to_str().unwrap();
     let flake_content = format!(
         r#"{{
   inputs.mylib.url = "git+file://{}";
@@ -184,7 +153,7 @@ fn test_flake_input_dotted_form() {
 
   outputs = {{ self, mylib }}: {{}};
 }}"#,
-        repo_path
+        repo.path_str()
     );
 
     let flake_path = flake_dir.path().join("flake.nix");
@@ -199,11 +168,9 @@ fn test_flake_input_dotted_form() {
 
 #[test]
 fn test_flake_input_inline_ref_github() {
-    let repo_dir = tempdir().unwrap();
-    create_git_repo_with_tags(repo_dir.path(), &["v0.6.0", "v0.7.0"]);
+    let repo = TestRepo::new(&["v0.6.0", "v0.7.0"]);
 
     let flake_dir = tempdir().unwrap();
-    let repo_path = repo_dir.path().to_str().unwrap();
     let flake_content = format!(
         r#"{{
   inputs = {{
@@ -214,7 +181,7 @@ fn test_flake_input_inline_ref_github() {
 
   outputs = {{ self, mylib }}: {{}};
 }}"#,
-        repo_path
+        repo.path_str()
     );
 
     let flake_path = flake_dir.path().join("flake.nix");
@@ -231,11 +198,9 @@ fn test_flake_input_inline_ref_github() {
 
 #[test]
 fn test_flake_input_inline_ref_bare_string() {
-    let repo_dir = tempdir().unwrap();
-    create_git_repo_with_tags(repo_dir.path(), &["v0.6.0", "v0.7.0"]);
+    let repo = TestRepo::new(&["v0.6.0", "v0.7.0"]);
 
     let flake_dir = tempdir().unwrap();
-    let repo_path = repo_dir.path().to_str().unwrap();
     let flake_content = format!(
         r#"{{
   inputs = {{
@@ -244,7 +209,7 @@ fn test_flake_input_inline_ref_bare_string() {
 
   outputs = {{ self, mylib }}: {{}};
 }}"#,
-        repo_path
+        repo.path_str()
     );
 
     let flake_path = flake_dir.path().join("flake.nix");
@@ -261,11 +226,9 @@ fn test_flake_input_inline_ref_bare_string() {
 
 #[test]
 fn test_flake_input_inline_ref_no_update() {
-    let repo_dir = tempdir().unwrap();
-    create_git_repo_with_tags(repo_dir.path(), &["v0.6.0"]);
+    let repo = TestRepo::new(&["v0.6.0"]);
 
     let flake_dir = tempdir().unwrap();
-    let repo_path = repo_dir.path().to_str().unwrap();
     let flake_content = format!(
         r#"{{
   inputs = {{
@@ -276,7 +239,7 @@ fn test_flake_input_inline_ref_no_update() {
 
   outputs = {{ self, mylib }}: {{}};
 }}"#,
-        repo_path
+        repo.path_str()
     );
 
     let flake_path = flake_dir.path().join("flake.nix");
@@ -313,11 +276,9 @@ fn test_flake_input_inline_ref_pinned() {
 
 #[test]
 fn test_update_mode_ref() {
-    let repo_dir = tempdir().unwrap();
-    create_git_repo_with_tags(repo_dir.path(), &["v1.0.0", "v2.0.0"]);
+    let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
 
     let flake_dir = tempdir().unwrap();
-    let repo_path = repo_dir.path().to_str().unwrap();
     let flake_content = format!(
         r#"{{
   inputs = {{
@@ -329,7 +290,7 @@ fn test_update_mode_ref() {
 
   outputs = {{ self, mylib }}: {{}};
 }}"#,
-        repo_path
+        repo.path_str()
     );
 
     let flake_path = flake_dir.path().join("flake.nix");
@@ -354,11 +315,9 @@ fn test_update_mode_ref() {
 
 #[test]
 fn test_update_mode_inline_ref() {
-    let repo_dir = tempdir().unwrap();
-    create_git_repo_with_tags(repo_dir.path(), &["v0.6.0", "v0.7.0"]);
+    let repo = TestRepo::new(&["v0.6.0", "v0.7.0"]);
 
     let flake_dir = tempdir().unwrap();
-    let repo_path = repo_dir.path().to_str().unwrap();
     let flake_content = format!(
         r#"{{
   inputs = {{
@@ -369,7 +328,7 @@ fn test_update_mode_inline_ref() {
 
   outputs = {{ self, mylib }}: {{}};
 }}"#,
-        repo_path
+        repo.path_str()
     );
 
     let flake_path = flake_dir.path().join("flake.nix");
