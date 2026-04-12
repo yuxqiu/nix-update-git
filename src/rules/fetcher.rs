@@ -605,4 +605,65 @@ mod tests {
         assert!(!FetcherRule::is_commit_hash("main"));
         assert!(!FetcherRule::is_commit_hash("short"));
     }
+
+    #[test]
+    fn test_fetcher_git_url_builtins_fetch_git() {
+        let mut params = HashMap::new();
+        params.insert(
+            "url".to_string(),
+            "https://example.com/repo.git".to_string(),
+        );
+        let url = FetcherKind::BuiltinsFetchGit.git_url(&params);
+        assert_eq!(url, Some("https://example.com/repo.git".to_string()));
+    }
+
+    #[test]
+    fn test_fetcher_git_url_fetchgit_with_url() {
+        let mut params = HashMap::new();
+        params.insert(
+            "url".to_string(),
+            "https://example.com/repo.git".to_string(),
+        );
+        let url = FetcherKind::FetchGit.git_url(&params);
+        assert_eq!(url, Some("https://example.com/repo.git".to_string()));
+    }
+
+    #[test]
+    fn test_uses_fetch_submodules_true_fetchsubmodules() {
+        let mut params = HashMap::new();
+        params.insert("fetchSubmodules".to_string(), "true".to_string());
+        assert!(FetcherKind::FetchFromGitHub.uses_fetch_submodules(&params));
+        assert!(FetcherKind::FetchFromGitLab.uses_fetch_submodules(&params));
+        assert!(FetcherKind::FetchFromGitea.uses_fetch_submodules(&params));
+        assert!(FetcherKind::FetchFromForgejo.uses_fetch_submodules(&params));
+        assert!(FetcherKind::FetchFromCodeberg.uses_fetch_submodules(&params));
+        assert!(FetcherKind::FetchFromBitbucket.uses_fetch_submodules(&params));
+    }
+
+    #[test]
+    fn test_uses_fetch_submodules_true_forcefetchgit() {
+        let mut params = HashMap::new();
+        params.insert("forceFetchGit".to_string(), "true".to_string());
+        assert!(FetcherKind::FetchFromGitHub.uses_fetch_submodules(&params));
+        assert!(FetcherKind::FetchFromGitLab.uses_fetch_submodules(&params));
+    }
+
+    #[test]
+    fn test_uses_fetch_submodules_false() {
+        let params = HashMap::new();
+        assert!(!FetcherKind::FetchFromGitHub.uses_fetch_submodules(&params));
+
+        let mut params = HashMap::new();
+        params.insert("fetchSubmodules".to_string(), "false".to_string());
+        assert!(!FetcherKind::FetchFromGitHub.uses_fetch_submodules(&params));
+    }
+
+    #[test]
+    fn test_uses_fetch_submodules_other_fetchers() {
+        let mut params = HashMap::new();
+        params.insert("fetchSubmodules".to_string(), "true".to_string());
+        assert!(!FetcherKind::FetchGit.uses_fetch_submodules(&params));
+        assert!(!FetcherKind::BuiltinsFetchGit.uses_fetch_submodules(&params));
+        assert!(!FetcherKind::FetchFromSavannah.uses_fetch_submodules(&params));
+    }
 }

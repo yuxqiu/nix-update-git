@@ -38,7 +38,7 @@ Requires `git` and `nix-prefetch-git` on `$PATH` at runtime.
 ## Usage
 
 ```
-nix-update-git [OPTIONS] [FILES]...
+nix-update-git [OPTIONS] [FILES_OR_DIRECTORIES]...
 
 Options:
   -c, --check            Check without making changes (default)
@@ -62,6 +62,12 @@ nix-update-git flake.nix
 
 ```bash
 nix-update-git --update flake.nix
+```
+
+### Multiple files or directories
+
+```bash
+nix-update-git flake.nix ./path/to/nix/
 ```
 
 ### Interactive mode

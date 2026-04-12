@@ -11,8 +11,8 @@ pub enum OutputFormat {
 #[command(version = concat!("v", env!("CARGO_PKG_VERSION"), "-", env!("GIT_HASH")))]
 #[command(about = "Update git references in Nix flake files and Nix expressions")]
 pub struct Cli {
-    #[arg(value_hint = clap::ValueHint::FilePath)]
-    pub files: Vec<std::path::PathBuf>,
+    #[arg(value_hint = clap::ValueHint::AnyPath, help = "Nix files or directories containing .nix files")]
+    pub files_or_directories: Vec<std::path::PathBuf>,
 
     #[arg(short, long, help = "Check without making changes (default)")]
     pub check: bool,

@@ -633,4 +633,59 @@ mod tests {
     fn test_parse_plain_url_returns_none() {
         assert!(FlakeInputRule::parse_flake_url("https://example.com/repo").is_none());
     }
+
+    #[test]
+    fn test_parse_github_url_trailing_slash() {
+        let result = FlakeInputRule::parse_flake_url("github:owner/repo/").unwrap();
+        if let FlakeUrl::GitHub { owner, repo } = result.flake_url {
+            assert_eq!(owner, "owner");
+            assert_eq!(repo, "repo/");
+        } else {
+            panic!("Expected GitHub");
+        }
+        assert_eq!(result.inline_ref, None);
+    }
+
+    #[test]
+    fn test_parse_git_https_without_ref() {
+        let result = FlakeInputRule::parse_flake_url("git+https://example.com/repo.git").unwrap();
+        if let FlakeUrl::GitRemote { url } = result.flake_url {
+            assert_eq!(url, "https://example.com/repo.git");
+        } else {
+            panic!("Expected GitRemote");
+        }
+        assert_eq!(result.inline_ref, None);
+    }
+
+    #[test]
+    fn test_parse_url_with_multiple_query_params() {
+        let result =
+            FlakeInputRule::parse_flake_url("github:owner/repo?ref=v1&rev=abc123&submodules=true")
+                .unwrap();
+        if let FlakeUrl::GitHub { owner, repo } = result.flake_url {
+            assert_eq!(owner, "owner");
+            assert_eq!(repo, "repo");
+        } else {
+            panic!("Expected GitHub");
+        }
+        assert_eq!(result.inline_ref.as_deref(), Some("v1"));
+    }
+
+    #[test]
+    fn test_reconstruct_url_round_trip() {
+        let test_cases = vec![
+            "github:owner/repo?ref=v1.0",
+            "gitlab:foo/bar?ref=main",
+            "sourcehut:~user/repo?ref=dev",
+            "git+https://example.com/repo.git?ref=master",
+            "git+ssh://git@example.com/repo.git?ref=main",
+        ];
+
+        for url in test_cases {
+            let parsed = FlakeInputRule::parse_flake_url(url).unwrap();
+            let ref_value = parsed.inline_ref.as_deref().unwrap_or("new-ref");
+            let reconstructed = FlakeInputRule::reconstruct_url(url, ref_value).unwrap();
+            let _reparsed = FlakeInputRule::parse_flake_url(&reconstructed).unwrap();
+        }
+    }
 }

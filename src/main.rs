@@ -1,11 +1,14 @@
+use std::fs;
+use std::io::{self, Write};
+use std::path::PathBuf;
+
 use anyhow::Result;
 use clap::Parser;
 use nix_update_git::cli::OutputFormat;
 use nix_update_git::parser::NixFile;
 use nix_update_git::rules::{FetcherRule, FlakeInputRule, RuleRegistry, Update};
 use serde::Serialize;
-use std::fs;
-use std::io::{self, Write};
+use walkdir::WalkDir;
 
 #[derive(Serialize)]
 struct UpdateEntry {
@@ -216,15 +219,49 @@ fn process_file_json(
     Ok(entries)
 }
 
+fn expand_inputs(inputs: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut result = Vec::new();
+
+    for input in inputs {
+        if input.is_file() {
+            if input.extension().is_some_and(|ext| ext == "nix") {
+                result.push(input);
+            }
+            continue;
+        }
+
+        if input.is_dir() {
+            for entry in WalkDir::new(input)
+                .follow_links(false)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
+                let path = entry.path();
+                if path.is_file() && path.extension().is_some_and(|ext| ext == "nix") {
+                    result.push(path.to_path_buf());
+                }
+            }
+        }
+    }
+
+    result
+}
+
 fn main() -> Result<()> {
     let cli = nix_update_git::cli::Cli::parse();
 
-    if cli.files.is_empty() {
+    if cli.files_or_directories.is_empty() {
         anyhow::bail!("No files specified. Use --help for usage information.");
     }
 
     if cli.check && cli.update {
         anyhow::bail!("--check and --update are mutually exclusive.");
+    }
+
+    let files = expand_inputs(cli.files_or_directories);
+
+    if files.is_empty() {
+        anyhow::bail!("No .nix files found in the provided inputs.");
     }
 
     let mut registry = RuleRegistry::new();
@@ -235,7 +272,7 @@ fn main() -> Result<()> {
         let mut all_entries: Vec<UpdateEntry> = Vec::new();
         let mut had_errors = false;
 
-        for file_path in &cli.files {
+        for file_path in &files {
             if !file_path.exists() {
                 eprintln!("File not found: {}", file_path.display());
                 had_errors = true;
@@ -260,7 +297,7 @@ fn main() -> Result<()> {
     }
 
     let mut all_ok = true;
-    for file_path in &cli.files {
+    for file_path in &files {
         if !file_path.exists() {
             eprintln!("File not found: {}", file_path.display());
             all_ok = false;
