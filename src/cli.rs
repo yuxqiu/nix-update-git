@@ -1,5 +1,11 @@
 use clap::Parser;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputFormat {
+    Text,
+    Json,
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "nix-update-git")]
 #[command(version = concat!("v", env!("CARGO_PKG_VERSION"), "-", env!("GIT_HASH")))]
@@ -19,4 +25,26 @@ pub struct Cli {
 
     #[arg(short, long, help = "Enable verbose output")]
     pub verbose: bool,
+
+    #[arg(
+        long,
+        value_name = "FORMAT",
+        default_value = "text",
+        help = "Output format: text or json"
+    )]
+    pub format: OutputFormat,
+}
+
+impl std::str::FromStr for OutputFormat {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "text" => Ok(Self::Text),
+            "json" => Ok(Self::Json),
+            _ => Err(format!(
+                "unknown output format: {s} (expected 'text' or 'json')"
+            )),
+        }
+    }
 }

@@ -37,26 +37,7 @@ Current integration tests (in `tests/`) cover the main flows but miss several pa
 
 Currently the fetcher rule only updates `rev` and `tag` if the current value looks like a version. But `fetchFromGitHub { ...; tag = "v1.0.0"; ... }` is a legitimate pattern where `tag` is a separate attribute that should be updated. Already partially handled — verify it works end-to-end with integration tests.
 
-### 2.2 `--dry-run` output format
-
-Currently check mode prints human-readable text. Consider adding `--format json` for machine-readable output:
-
-```json
-[
-  {
-    "file": "flake.nix",
-    "rule": "flake-input",
-    "field": "inputs.mylib.ref",
-    "old": "v1.0.0",
-    "new": "v2.0.0",
-    "range": [120, 127]
-  }
-]
-```
-
-This enables integration with editor tooling and CI systems.
-
-### 2.3 `nix-prefetch-git` fallback strategy
+### 2.2 `nix-prefetch-git` fallback strategy
 
 If `nix-prefetch-git` is not available, the tool currently just prints a warning and skips hash updates. Consider:
 
@@ -76,7 +57,7 @@ pkgs.fetchFromGitHub {
 }
 ```
 
-### 2.4 `ref` vs `rev` disambiguation
+### 2.3 `ref` vs `rev` disambiguation
 
 The `handle_branch_following` method currently picks between `"rev"` and `"ref"` keys with a somewhat ad-hoc heuristic. The logic should be:
 
@@ -86,22 +67,8 @@ The `handle_branch_following` method currently picks between `"rev"` and `"ref"`
 
 This is already what the code does, but it should be clearly documented in comments.
 
-## 3. Code quality
+## 3. Performance
 
-### 3.1 Error reporting
-
-Currently errors are printed to stderr with `eprintln!` in various places. Consider:
-
-- Using `anyhow` consistently at the top level (`process_file` already returns `Result`).
-- A `--quiet` flag to suppress warnings.
-- Structured error codes (exit 0 = no updates, exit 1 = error, exit 2 = updates found in check mode).
-
-### 3.2 Better `string_content` handling
-
-The current `string_content` method strips quotes manually (`text[1..len-1]`), which doesn't handle escape sequences like `\"` or `\n` inside strings. For the current use case (URLs, refs, hashes) this is fine, but a more robust approach would use the rnix AST's string token API.
-
-## 4. Performance
-
-### 4.1 Parallel file processing
+### 3.1 Parallel file processing
 
 Currently files are processed sequentially. For large repos with many `.nix` files, processing them in parallel with `rayon` or `std::thread::scope` would be a significant speedup.

@@ -41,12 +41,13 @@ Requires `git` and `nix-prefetch-git` on `$PATH` at runtime.
 nix-update-git [OPTIONS] [FILES]...
 
 Options:
-  -c, --check        Check without making changes (default)
-  -u, --update       Perform updates
-  -i, --interactive  Confirm each update
-  -v, --verbose      Enable verbose output
-  -h, --help         Print help
-  -V, --version      Print version
+  -c, --check            Check without making changes (default)
+  -u, --update           Perform updates
+  -i, --interactive      Confirm each update
+  -v, --verbose          Enable verbose output
+      --format <FORMAT>  Output format: text or json [default: text]
+  -h, --help             Print help
+  -V, --version          Print version
 ```
 
 ### Check mode (default)
@@ -68,6 +69,29 @@ nix-update-git --update flake.nix
 ```bash
 nix-update-git --update --interactive flake.nix
 ```
+
+### JSON output
+
+```bash
+nix-update-git --format json flake.nix
+```
+
+Outputs machine-readable JSON:
+
+```json
+[
+  {
+    "file": "flake.nix",
+    "rule": "flake-input",
+    "field": "inputs.mylib.ref",
+    "old": "\"v1.0.0\"",
+    "new": "\"v2.0.0\"",
+    "range": [120, 128]
+  }
+]
+```
+
+Combine with `--update` to apply changes and get a JSON summary of what was updated.
 
 ## Supported patterns
 

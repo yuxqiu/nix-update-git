@@ -1,30 +1,22 @@
 use anyhow::Result;
 use clap::Parser;
+use nix_update_git::cli::OutputFormat;
 use nix_update_git::parser::NixFile;
 use nix_update_git::rules::{FetcherRule, FlakeInputRule, RuleRegistry, Update};
+use serde::Serialize;
 use std::fs;
 use std::io::{self, Write};
 
-/// Apply updates to file content, using a greedy interval-scheduling approach
-/// to detect and skip overlapping ranges.
-///
-/// Sorts updates by start position and walks through them in order. If an
-/// update's range overlaps with the last accepted update's range, the current
-/// update is skipped and a warning is printed. The last accepted update is
-/// also removed when an overlap is detected, since two overlapping ranges
-/// cannot both be applied correctly.
-///
-/// Tradeoffs vs. an O(n²) pairwise check:
-/// - We only report overlaps between adjacent updates in the sorted order.
-///   If update A overlaps both B and C but B and C don't overlap each other,
-///   we report A↔B and skip both, then accept C (which is correct: C doesn't
-///   overlap A since A is now excluded). A full pairwise check would also
-///   report A↔C, but C can safely be applied since A was excluded.
-/// - In the rare case where three updates have transitive overlaps
-///   (A overlaps B, B overlaps C, A does not overlap C), the greedy approach
-///   correctly excludes A and B (due to their overlap) and accepts C (since
-///   the last accepted before C does not overlap it), which produces valid
-///   output. A full pairwise check would exclude all three.
+#[derive(Serialize)]
+struct UpdateEntry {
+    file: String,
+    rule: String,
+    field: String,
+    old: String,
+    new: String,
+    range: [usize; 2],
+}
+
 fn apply_updates(content: &str, updates: &[Update], file_path: &std::path::Path) -> String {
     let mut sorted_updates: Vec<&Update> = updates.iter().collect();
     sorted_updates.sort_by_key(|u| u.range.start);
@@ -187,22 +179,85 @@ fn process_file(
     Ok(!had_errors)
 }
 
+fn process_file_json(
+    file_path: &std::path::Path,
+    registry: &RuleRegistry,
+    update: bool,
+) -> Result<Vec<UpdateEntry>> {
+    let content = fs::read_to_string(file_path)?;
+    let nix_file = NixFile::parse(&content)?;
+    let root_node = nix_file.root_node();
+    let results = registry.check_all(&root_node)?;
+
+    let mut entries = Vec::new();
+    for (_rule_name, updates) in &results {
+        for u in updates {
+            let old_text = &content[u.range.start..u.range.end];
+            entries.push(UpdateEntry {
+                file: file_path.to_string_lossy().to_string(),
+                rule: u.rule_name.clone(),
+                field: u.field.clone(),
+                old: old_text.to_string(),
+                new: u.replacement.clone(),
+                range: [u.range.start, u.range.end],
+            });
+        }
+    }
+
+    if update && !entries.is_empty() {
+        let all_updates: Vec<Update> = results
+            .into_iter()
+            .flat_map(|(_, updates)| updates)
+            .collect();
+        let new_content = apply_updates(&content, &all_updates, file_path);
+        fs::write(file_path, &new_content)?;
+    }
+
+    Ok(entries)
+}
+
 fn main() -> Result<()> {
     let cli = nix_update_git::cli::Cli::parse();
 
     if cli.files.is_empty() {
-        eprintln!("No files specified. Use --help for usage information.");
-        std::process::exit(1);
+        anyhow::bail!("No files specified. Use --help for usage information.");
     }
 
     if cli.check && cli.update {
-        eprintln!("Error: --check and --update are mutually exclusive.");
-        std::process::exit(1);
+        anyhow::bail!("--check and --update are mutually exclusive.");
     }
 
     let mut registry = RuleRegistry::new();
     registry.register(FlakeInputRule::new());
     registry.register(FetcherRule::new());
+
+    if cli.format == OutputFormat::Json {
+        let mut all_entries: Vec<UpdateEntry> = Vec::new();
+        let mut had_errors = false;
+
+        for file_path in &cli.files {
+            if !file_path.exists() {
+                eprintln!("File not found: {}", file_path.display());
+                had_errors = true;
+                continue;
+            }
+
+            match process_file_json(file_path, &registry, cli.update) {
+                Ok(entries) => all_entries.extend(entries),
+                Err(e) => {
+                    eprintln!("{}", e);
+                    had_errors = true;
+                }
+            }
+        }
+
+        println!("{}", serde_json::to_string_pretty(&all_entries).unwrap());
+
+        if had_errors {
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
 
     let mut all_ok = true;
     for file_path in &cli.files {
