@@ -40,10 +40,12 @@ cargo install --git https://github.com/yuxqiu/nix-update-git
 nix-update-git [OPTIONS] [FILES]...
 
 Options:
-  -c, --check         Check without making changes (default)
-  -u, --update        Perform updates in place
-  -i, --interactive   Confirm each update before applying
-  -h, --help          Show help
+  -c, --check        Check without making changes (default)
+  -u, --update       Perform updates
+  -i, --interactive  Confirm each update
+  -v, --verbose      Enable verbose output
+  -h, --help         Print help
+  -V, --version      Print version
 ```
 
 ### Check mode (default)

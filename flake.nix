@@ -53,7 +53,7 @@
 
             meta = with pkgs.lib; {
               description = "Update git references in Nix flake files and Nix expressions";
-              homepage = "https://github.com/YuqiQiu/nix-update-git";
+              homepage = "https://github.com/yuxqiu/nix-update-git";
               license = licenses.mit;
               mainProgram = "nix-update-git";
             };
