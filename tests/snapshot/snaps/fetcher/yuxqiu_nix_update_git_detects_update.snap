@@ -1,0 +1,17 @@
+---
+source: tests/snapshot/mod.rs
+expression: output_for_insta
+input_file: tests/snapshot/data/fetcher/yuxqiu_nix_update_git_detects_update.nix
+---
+[
+  {
+    "rule": "fetcher",
+    "field": "fetchFromGitHub.rev",
+    "old": "\"v0.1.0\""
+  },
+  {
+    "rule": "fetcher",
+    "field": "fetchFromGitHub.hash",
+    "old": "\"sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\""
+  }
+]

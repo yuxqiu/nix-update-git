@@ -1,0 +1,12 @@
+---
+source: tests/snapshot/mod.rs
+expression: output_for_insta
+input_file: tests/snapshot/data/fetcher/yuxqiu_nix_update_git_builtins_fetch_git.nix
+---
+[
+  {
+    "rule": "fetcher",
+    "field": "builtins.fetchGit.ref",
+    "old": "\"v0.1.0\""
+  }
+]

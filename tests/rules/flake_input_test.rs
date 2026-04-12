@@ -1,7 +1,5 @@
-mod common;
-
+use super::common::TestRepo;
 use assert_cmd::Command;
-use common::TestRepo;
 use std::fs;
 use tempfile::tempdir;
 
