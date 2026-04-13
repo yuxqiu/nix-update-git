@@ -21,9 +21,3 @@ pkgs.fetchFromGitHub {
   # hash = "sha256-LPDiiEPOZu5Ah5vCLyCMT3w1uoBhUjyqoPWCOiLVLnw=";
 }
 ```
-
-## 2. Performance
-
-### 2.1 Parallel file processing
-
-Currently files are processed sequentially. For large repos with many `.nix` files, processing them in parallel with `rayon` or `std::thread::scope` would be a significant speedup.

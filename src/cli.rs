@@ -33,6 +33,15 @@ pub struct Cli {
         help = "Output format: text or json"
     )]
     pub format: OutputFormat,
+
+    #[arg(
+        short,
+        long,
+        value_name = "N",
+        default_value_t = 4,
+        help = "Number of parallel file processing jobs"
+    )]
+    pub jobs: usize,
 }
 
 impl std::str::FromStr for OutputFormat {
