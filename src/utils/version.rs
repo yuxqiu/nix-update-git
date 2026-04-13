@@ -1,17 +1,23 @@
-use semver::Version;
 use std::cmp::Ordering;
+
+use versions::Versioning;
 
 pub struct VersionDetector;
 
 impl VersionDetector {
     pub fn is_version(s: &str) -> bool {
-        Self::parse_flexible(s).is_some()
+        Self::parse(s).is_some()
     }
 
     pub fn compare(a: &str, b: &str) -> Ordering {
-        let version_a = Self::parse_version(a);
-        let version_b = Self::parse_version(b);
-        version_a.cmp(&version_b)
+        let version_a = Self::parse(a);
+        let version_b = Self::parse(b);
+        match (version_a, version_b) {
+            (Some(a), Some(b)) => a.cmp(&b),
+            (Some(_), None) => Ordering::Greater,
+            (None, Some(_)) => Ordering::Less,
+            (None, None) => Ordering::Equal,
+        }
     }
 
     pub fn latest<'a>(versions: &'a [&str]) -> Option<&'a str> {
@@ -22,37 +28,11 @@ impl VersionDetector {
             .copied()
     }
 
-    fn parse_flexible(s: &str) -> Option<Version> {
-        let stripped = s.strip_prefix('v').unwrap_or(s);
-
-        if let Ok(v) = Version::parse(stripped) {
-            return Some(v);
-        }
-
-        let parts: Vec<&str> = stripped.split('.').collect();
-        if parts.is_empty() || parts.len() > 3 {
+    fn parse(s: &str) -> Option<Versioning> {
+        if !s.contains(|c: char| c.is_ascii_digit()) {
             return None;
         }
-
-        if !parts.iter().all(|p| p.chars().all(|c| c.is_ascii_digit())) {
-            return None;
-        }
-
-        let padded = match parts.len() {
-            1 => format!("{}.0.0", stripped),
-            2 => format!("{}.0", stripped),
-            _ => stripped.to_string(),
-        };
-
-        Version::parse(&padded).ok()
-    }
-
-    fn parse_version(s: &str) -> Version {
-        if let Some(v) = Self::parse_flexible(s) {
-            v
-        } else {
-            Version::new(0, 0, 0)
-        }
+        Versioning::new(s)
     }
 }
 
@@ -69,7 +49,12 @@ mod tests {
         assert!(VersionDetector::is_version("140.0"));
         assert!(VersionDetector::is_version("v140.0"));
         assert!(VersionDetector::is_version("100"));
-        assert!(!VersionDetector::is_version("1.2.3.4"));
+        assert!(VersionDetector::is_version("1.2.3.4"));
+        assert!(VersionDetector::is_version("25.01"));
+        assert!(VersionDetector::is_version("2025.01"));
+        assert!(VersionDetector::is_version("2025.01"));
+        assert!(VersionDetector::is_version("2025.01.01"));
+        assert!(VersionDetector::is_version("2025.01.01.123456"));
         assert!(!VersionDetector::is_version("main"));
         assert!(!VersionDetector::is_version("master"));
     }
