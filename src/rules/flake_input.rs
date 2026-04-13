@@ -451,7 +451,8 @@ impl UpdateRule for FlakeInputRule {
                 None => continue,
             };
 
-            if let Ok(Some(latest_tag)) = GitFetcher::get_latest_tag(&remote_url)
+            if let Ok(Some(latest_tag)) =
+                GitFetcher::get_latest_tag_matching(&remote_url, Some(&ref_sv.value))
                 && VersionDetector::compare(&ref_sv.value, &latest_tag) == std::cmp::Ordering::Less
             {
                 if input_def.inline_ref {

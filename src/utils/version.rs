@@ -20,12 +20,27 @@ impl VersionDetector {
         }
     }
 
+    pub fn latest_matching<'a>(versions: &'a [&str], current: &str) -> Option<&'a str> {
+        let prefix = Self::prefix(current);
+        versions
+            .iter()
+            .filter(|v| Self::is_version(v))
+            .filter(|v| Self::prefix(v) == prefix)
+            .max_by(|a, b| Self::compare(a, b))
+            .copied()
+    }
+
     pub fn latest<'a>(versions: &'a [&str]) -> Option<&'a str> {
         versions
             .iter()
             .filter(|v| Self::is_version(v))
             .max_by(|a, b| Self::compare(a, b))
             .copied()
+    }
+
+    fn prefix(s: &str) -> &str {
+        let end = s.find(|c: char| c.is_ascii_digit()).unwrap_or(s.len());
+        &s[..end]
     }
 
     fn parse(s: &str) -> Option<Versioning> {
@@ -73,6 +88,47 @@ mod tests {
         assert_eq!(VersionDetector::compare("v1.0.0", "v1.0.1"), Ordering::Less);
         assert_eq!(VersionDetector::compare("140.0", "141.0"), Ordering::Less);
         assert_eq!(VersionDetector::compare("100", "200"), Ordering::Less);
+    }
+
+    #[test]
+    fn test_prefix() {
+        assert_eq!(VersionDetector::prefix("v1.0.0"), "v");
+        assert_eq!(VersionDetector::prefix("V2.0"), "V");
+        assert_eq!(VersionDetector::prefix("1.0.0"), "");
+        assert_eq!(VersionDetector::prefix("140.0"), "");
+        assert_eq!(VersionDetector::prefix("release-1.0.0"), "release-");
+        assert_eq!(VersionDetector::prefix("rc-2.0-beta"), "rc-");
+    }
+
+    #[test]
+    fn test_latest_matching() {
+        let versions: Vec<&str> = vec!["v1.0.0", "v2.0.0", "2.6", "v1.5.0"];
+        assert_eq!(
+            VersionDetector::latest_matching(&versions, "v2.41"),
+            Some("v2.0.0")
+        );
+        assert_eq!(
+            VersionDetector::latest_matching(&versions, "2.41"),
+            Some("2.6")
+        );
+
+        let versions: Vec<&str> = vec!["v1.0.0", "v2.0.0", "v1.5.0"];
+        assert_eq!(
+            VersionDetector::latest_matching(&versions, "v1.0.0"),
+            Some("v2.0.0")
+        );
+
+        let versions: Vec<&str> = vec!["1.0.0", "2.0.0", "1.5.0"];
+        assert_eq!(
+            VersionDetector::latest_matching(&versions, "1.0.0"),
+            Some("2.0.0")
+        );
+
+        let versions: Vec<&str> = vec!["release-1.0.0", "release-2.0.0", "v3.0.0"];
+        assert_eq!(
+            VersionDetector::latest_matching(&versions, "release-1.0.0"),
+            Some("release-2.0.0")
+        );
     }
 
     #[test]

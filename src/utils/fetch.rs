@@ -86,6 +86,10 @@ impl GitFetcher {
     }
 
     pub fn get_latest_tag(url: &str) -> Result<Option<String>> {
+        Self::get_latest_tag_matching(url, None)
+    }
+
+    pub fn get_latest_tag_matching(url: &str, current: Option<&str>) -> Result<Option<String>> {
         let refs = Self::list_refs(url, &[RefType::Tags])?;
         let tags: Vec<&GitRef> = refs.iter().filter(|r| r.kind == RefKind::Tag).collect();
 
@@ -94,7 +98,11 @@ impl GitFetcher {
         }
 
         let tag_names: Vec<&str> = tags.iter().map(|t| t.name.as_str()).collect();
-        Ok(VersionDetector::latest(&tag_names).map(|s| s.to_string()))
+        let result = match current {
+            Some(cur) => VersionDetector::latest_matching(&tag_names, cur),
+            None => VersionDetector::latest(&tag_names),
+        };
+        Ok(result.map(|s| s.to_string()))
     }
 
     pub fn get_latest_commit(url: &str, branch: &str) -> Result<Option<String>> {

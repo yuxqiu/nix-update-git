@@ -385,7 +385,7 @@ impl FetcherRule {
             return Ok(());
         };
 
-        let latest = match GitFetcher::get_latest_tag(git_url)? {
+        let latest = match GitFetcher::get_latest_tag_matching(git_url, Some(&current_version))? {
             Some(tag) => tag,
             None => return Ok(()),
         };
