@@ -148,8 +148,6 @@ Once all fetcher kinds have pure Rust hash computation, remove the
 - Remove `NixPrefetcher` from `src/utils/mod.rs` public exports
 - Remove `nix-prefetch-git` references from `src/rules/fetcher.rs`
 - Update documentation to remove `nix-prefetch-git` from requirements
-- Keep `--no-prefetch` flag (still useful for skipping hash computation
-  entirely in CI or offline scenarios)
 - Update `flake.nix` to remove `nix-prefetch-git` from build inputs
 
 **Verification**: Full test suite passes. Manual testing of all supported

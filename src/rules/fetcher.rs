@@ -172,18 +172,11 @@ struct FetcherCall {
     follow_branch: Option<String>,
 }
 
-pub struct FetcherRule {
-    no_prefetch: bool,
-}
+pub struct FetcherRule;
 
 impl FetcherRule {
     pub fn new() -> Self {
-        Self { no_prefetch: false }
-    }
-
-    pub fn with_no_prefetch(mut self, no_prefetch: bool) -> Self {
-        self.no_prefetch = no_prefetch;
-        self
+        Self
     }
 
     fn extract_fetcher_calls(root: &NixNode) -> Vec<FetcherCall> {
@@ -334,7 +327,7 @@ impl FetcherRule {
             ));
 
             if call.kind.needs_hash() {
-                Self::try_prefetch_hash(self.no_prefetch, call, &new_sha, updates);
+                Self::try_prefetch_hash(call, &new_sha, updates);
             }
         }
 
@@ -406,7 +399,7 @@ impl FetcherRule {
                     .ok()
                     .flatten();
                 let prefetch_rev = rev_for_prefetch.as_deref().unwrap_or(&latest);
-                Self::try_prefetch_hash(self.no_prefetch, call, prefetch_rev, updates);
+                Self::try_prefetch_hash(call, prefetch_rev, updates);
             }
         }
 
@@ -417,16 +410,7 @@ impl FetcherRule {
         s.len() == 40 && s.chars().all(|c| c.is_ascii_hexdigit())
     }
 
-    fn try_prefetch_hash(
-        no_prefetch: bool,
-        call: &FetcherCall,
-        rev: &str,
-        updates: &mut Vec<Update>,
-    ) {
-        if no_prefetch {
-            return;
-        }
-
+    fn try_prefetch_hash(call: &FetcherCall, rev: &str, updates: &mut Vec<Update>) {
         let has_sri_hash = call
             .params
             .get("hash")

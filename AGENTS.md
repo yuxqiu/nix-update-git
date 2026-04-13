@@ -30,13 +30,19 @@ Nix builds exclude network tests via `cargoTestFlags = [ "--no-default-features"
 
 Single-crate Rust project. Edition 2024 (requires Rust ≥ 1.85).
 
-- `src/cli.rs` — clap CLI definition (`--check`, `--update`, `--interactive`, `--verbose`, `--format`)
-- `src/main.rs` — entry point; check/update/interactive/json modes; `apply_updates()` does source-level text splicing
+- `src/cli.rs` — clap CLI definition (`--check`, `--update`, `--interactive`, `--verbose`, `--format`, `--jobs`)
+- `src/main.rs` — entry point; parallel check via rayon, then display/apply loop; binary-only modules: `check`, `output`, `patch`
+- `src/check.rs` — `FileResult` struct + `check_file()` (read → parse → run rules)
+- `src/output.rs` — `UpdateEntry` (JSON), `print_updates()`, `print_json()`, `select_interactive()`, `prompt_confirmation()`
+- `src/patch.rs` — `apply_updates()` does source-level text splicing with overlap detection
 - `src/parser/ast.rs` — rnix wrapper; `NixFile`, `NixNode`, `TextRange`, `NixError`; `string_content()` uses `rnix::ast::Str::normalized_parts()` for proper escape handling; `has_pin_comment()` only checks immediate sibling tokens, not recursive children
 - `src/rules/flake_input.rs` — the main rule; parses flake input URLs (github:, gitlab:, sourcehut:, git+https/ssh/file) and detects version updates via `git ls-remote`
 - `src/rules/traits.rs` — `UpdateRule` trait, `Update` struct (carries `TextRange` for in-place editing), `RuleRegistry`
-- `src/utils/version.rs` — semver version comparison (`VersionDetector`)
-- `src/utils/fetch.rs` — `GitFetcher` wraps `git ls-remote`
+- `src/utils/version.rs` — version comparison (`VersionDetector`); `prefix()` extracts non-numeric prefix; `latest_matching()` filters candidates by prefix shape
+- `src/utils/fetch.rs` — `GitFetcher` wraps `git ls-remote`; `get_latest_tag_matching()` accepts current version for shape-aware tag selection
+- `src/utils/nar.rs` — NAR serialization + SHA-256 hashing; `hash_path()` produces `NarHash` with SRI, nix-base32, and hex formats
+- `src/utils/tarball.rs` — `TarballHasher` downloads + unpacks tarballs, then NAR-hashes the result
+- `src/utils/prefetch.rs` — `NixPrefetcher` wraps `nix-prefetch-git` (fallback for fetchers not yet supported by pure Rust hashing)
 
 ## Key design decisions
 
@@ -48,3 +54,5 @@ Single-crate Rust project. Edition 2024 (requires Rust ≥ 1.85).
 - Inline `?ref=` in URLs is supported (e.g., `github:owner/repo?ref=v1.0`). The ref is extracted from the URL and compared as a version; on update, the entire URL string is replaced.
 - `ref` vs `rev` disambiguation in branch following: if `rev` key exists → update `rev`; if `ref` key exists and the call is `builtins.fetchGit` → update `ref`; otherwise default to `rev`. Documented in `handle_branch_following` comments in `src/rules/fetcher.rs`.
 - The `tag` attribute is supported as a first-class update target: `tag` takes priority over `rev` in `handle_version_update`. When both `tag` and `rev` are present, `tag` is updated.
+- Hash prefetching uses a dispatch strategy: `fetchFromGitHub`/`fetchFromGitLab`/`fetchFromCodeberg` (default tarball path) use pure Rust NAR hashing via `TarballHasher` + `hash_path()`. All other fetchers fall back to `nix-prefetch-git` via `NixPrefetcher`. This eliminates the known `nix-prefetch-git` hash mismatch bug for tarball-based fetchers (e.g., arkenfox/user.js).
+- Version shape matching: `VersionDetector::latest_matching()` filters candidate tags to those sharing the same non-numeric prefix as the current version. This prevents cross-shape updates like `v2.41 → 2.6`. The prefix is extracted by `VersionDetector::prefix()` (everything before the first digit).

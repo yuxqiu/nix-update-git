@@ -2,13 +2,12 @@
 
 Update git references in Nix flake files and Nix expressions.
 
-`nix-update-git` detects outdated version tags and branch commits in flake inputs and fetcher calls, then updates them in place. It also prefetches hashes via `nix-prefetch-git` so both `hash` and `sha256` stay in sync.
+`nix-update-git` detects outdated version tags and branch commits in flake inputs and fetcher calls, then updates them in place.
 
 ## Features
 
 - **Flake inputs**: update `ref` values and inline `?ref=` in URL strings
 - **Fetcher calls**: update `rev`, `tag`, and `ref` in `fetchgit`, `fetchFromGitHub`, `fetchFromGitLab`, `fetchFromGitea`, `fetchFromForgejo`, `fetchFromCodeberg`, `fetchFromSourcehut`, `fetchFromBitbucket`, `fetchFromSavannah`, `fetchFromRepoOrCz`, `fetchFrom9Front`, `fetchFromGitiles`, and `builtins.fetchGit`
-- **Hash prefetching**: automatically update `hash` (SRI) and `sha256` (nix-base32) via `nix-prefetch-git`
 - **Branch following**: use `# follow:<branch>` comments to track a branch's latest commit instead of version tags
 - **Pinning**: `# pin` comments on any input or fetcher call skips it entirely
 - **Multiple modes**: check (default), update, and interactive
@@ -33,7 +32,7 @@ inputs.nix-update-git.url = "github:yuxqiu/nix-update-git";
 cargo install --git https://github.com/yuxqiu/nix-update-git
 ```
 
-Requires `git` and `nix-prefetch-git` on `$PATH` at runtime.
+Requires `git` on `$PATH` at runtime. `nix-prefetch-git` is optional — needed only for `fetchgit` and fetchers with `fetchSubmodules = true`.
 
 ## Usage
 
@@ -46,6 +45,7 @@ Options:
   -i, --interactive      Confirm each update
   -v, --verbose          Enable verbose output
       --format <FORMAT>  Output format: text or json [default: text]
+  -j, --jobs <N>         Number of parallel file processing jobs [default: 4]
   -h, --help             Print help
   -V, --version          Print version
 ```

@@ -42,9 +42,6 @@ pub struct Cli {
         help = "Number of parallel file processing jobs"
     )]
     pub jobs: usize,
-
-    #[arg(long, help = "Skip hash prefetching entirely")]
-    pub no_prefetch: bool,
 }
 
 impl std::str::FromStr for OutputFormat {

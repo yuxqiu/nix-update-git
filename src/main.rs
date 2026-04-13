@@ -67,7 +67,7 @@ fn main() -> Result<()> {
 
     let mut registry = RuleRegistry::new();
     registry.register(FlakeInputRule::new());
-    registry.register(FetcherRule::new().with_no_prefetch(cli.no_prefetch));
+    registry.register(FetcherRule::new());
 
     let results: Vec<_> = files.par_iter().map(|p| check_file(p, &registry)).collect();
 
