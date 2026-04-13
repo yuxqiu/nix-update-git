@@ -1,6 +1,6 @@
 use crate::parser::{NixNode, TextRange};
 use crate::rules::traits::{Update, UpdateRule};
-use crate::utils::{GitFetcher, NixPrefetcher, VersionDetector};
+use crate::utils::{GitFetcher, NarHash, NixPrefetcher, TarballHasher, VersionDetector};
 use anyhow::Result;
 use std::collections::HashMap;
 
@@ -65,6 +65,13 @@ impl FetcherKind {
 
     fn needs_hash(&self) -> bool {
         !matches!(self, Self::BuiltinsFetchGit)
+    }
+
+    fn uses_tarball(&self, params: &HashMap<String, String>) -> bool {
+        matches!(
+            self,
+            Self::FetchFromGitHub | Self::FetchFromGitLab | Self::FetchFromCodeberg
+        ) && !self.uses_fetch_submodules(params)
     }
 
     fn git_url(&self, params: &HashMap<String, String>) -> Option<String> {
@@ -165,11 +172,18 @@ struct FetcherCall {
     follow_branch: Option<String>,
 }
 
-pub struct FetcherRule;
+pub struct FetcherRule {
+    no_prefetch: bool,
+}
 
 impl FetcherRule {
     pub fn new() -> Self {
-        Self
+        Self { no_prefetch: false }
+    }
+
+    pub fn with_no_prefetch(mut self, no_prefetch: bool) -> Self {
+        self.no_prefetch = no_prefetch;
+        self
     }
 
     fn extract_fetcher_calls(root: &NixNode) -> Vec<FetcherCall> {
@@ -243,7 +257,7 @@ impl FetcherRule {
         calls
     }
 
-    fn check_fetcher_call(call: &FetcherCall) -> Result<Option<Vec<Update>>> {
+    fn check_fetcher_call(&self, call: &FetcherCall) -> Result<Option<Vec<Update>>> {
         if call.pinned {
             return Ok(None);
         }
@@ -256,9 +270,9 @@ impl FetcherRule {
         let mut updates = Vec::new();
 
         if let Some(branch) = &call.follow_branch {
-            Self::handle_branch_following(call, &git_url, branch, &mut updates)?;
+            self.handle_branch_following(call, &git_url, branch, &mut updates)?;
         } else {
-            Self::handle_version_update(call, &git_url, &mut updates)?;
+            self.handle_version_update(call, &git_url, &mut updates)?;
         }
 
         if updates.is_empty() {
@@ -279,6 +293,7 @@ impl FetcherRule {
     ///   `builtins.fetchGit`).
     /// - Otherwise → update `rev` (the default for all other fetcher kinds).
     fn handle_branch_following(
+        &self,
         call: &FetcherCall,
         git_url: &str,
         branch: &str,
@@ -319,7 +334,7 @@ impl FetcherRule {
             ));
 
             if call.kind.needs_hash() {
-                Self::try_prefetch_hash(call, &new_sha, updates);
+                Self::try_prefetch_hash(self.no_prefetch, call, &new_sha, updates);
             }
         }
 
@@ -339,6 +354,7 @@ impl FetcherRule {
     /// 3. `ref` — only for `builtins.fetchGit`, which uses `ref` for version
     ///    tags instead of `rev`. Skip for other fetcher kinds.
     fn handle_version_update(
+        &self,
         call: &FetcherCall,
         git_url: &str,
         updates: &mut Vec<Update>,
@@ -390,7 +406,7 @@ impl FetcherRule {
                     .ok()
                     .flatten();
                 let prefetch_rev = rev_for_prefetch.as_deref().unwrap_or(&latest);
-                Self::try_prefetch_hash(call, prefetch_rev, updates);
+                Self::try_prefetch_hash(self.no_prefetch, call, prefetch_rev, updates);
             }
         }
 
@@ -401,7 +417,16 @@ impl FetcherRule {
         s.len() == 40 && s.chars().all(|c| c.is_ascii_hexdigit())
     }
 
-    fn try_prefetch_hash(call: &FetcherCall, rev: &str, updates: &mut Vec<Update>) {
+    fn try_prefetch_hash(
+        no_prefetch: bool,
+        call: &FetcherCall,
+        rev: &str,
+        updates: &mut Vec<Update>,
+    ) {
+        if no_prefetch {
+            return;
+        }
+
         let has_sri_hash = call
             .params
             .get("hash")
@@ -412,43 +437,102 @@ impl FetcherRule {
             return;
         }
 
-        let git_url = match call.kind.git_url(&call.params) {
-            Some(url) => url,
-            None => return,
-        };
-
-        let use_submodules = call.kind.uses_fetch_submodules(&call.params);
-
-        let result = if use_submodules {
-            NixPrefetcher::prefetch_git_with_submodules(&git_url, rev)
-        } else {
-            NixPrefetcher::prefetch_git(&git_url, rev)
-        };
+        let result = Self::compute_hash(call, rev);
 
         match result {
-            Ok(prefetch) => {
+            Ok(nar_hash) => {
                 if has_sri_hash && let Some(range) = call.source_ranges.get("hash") {
                     updates.push(Update::new(
                         format!("{}.hash", call.kind.name()),
-                        format!("\"{}\"", prefetch.sri_hash),
+                        format!("\"{}\"", nar_hash.sri),
                         *range,
                     ));
                 }
                 if has_nix32_hash && let Some(range) = call.source_ranges.get("sha256") {
                     updates.push(Update::new(
                         format!("{}.sha256", call.kind.name()),
-                        format!("\"{}\"", prefetch.sha256_nix),
+                        format!("\"{}\"", nar_hash.nix32),
                         *range,
                     ));
                 }
             }
             Err(e) => {
+                let git_url = call.kind.git_url(&call.params).unwrap_or_default();
                 eprintln!(
                     "Warning: could not prefetch hash for {} @ {}: {}",
                     git_url, rev, e
                 );
             }
         }
+    }
+
+    fn compute_hash(call: &FetcherCall, rev: &str) -> Result<NarHash> {
+        if call.kind.uses_tarball(&call.params) {
+            Self::compute_tarball_hash(call, rev)
+        } else {
+            Self::compute_git_hash(call, rev)
+        }
+    }
+
+    fn compute_tarball_hash(call: &FetcherCall, rev: &str) -> Result<NarHash> {
+        match call.kind {
+            FetcherKind::FetchFromGitHub => {
+                let owner = call.params.get("owner").map(|s| s.as_str()).unwrap_or("");
+                let repo = call.params.get("repo").map(|s| s.as_str()).unwrap_or("");
+                let github_base = call
+                    .params
+                    .get("githubBase")
+                    .map(|s| s.as_str())
+                    .unwrap_or("github.com");
+                let url = format!(
+                    "https://{}/{}/{}/archive/{}.tar.gz",
+                    github_base, owner, repo, rev
+                );
+                TarballHasher::hash_tarball_url(&url)
+            }
+            FetcherKind::FetchFromGitLab => {
+                let domain = call
+                    .params
+                    .get("domain")
+                    .map(|s| s.as_str())
+                    .unwrap_or("gitlab.com");
+                let owner = call.params.get("owner").map(|s| s.as_str()).unwrap_or("");
+                let repo = call.params.get("repo").map(|s| s.as_str()).unwrap_or("");
+                let url = format!(
+                    "https://{}/{}/{}/-/archive/{}/{}-{}.tar.gz",
+                    domain, owner, repo, rev, repo, rev
+                );
+                TarballHasher::hash_tarball_url(&url)
+            }
+            FetcherKind::FetchFromCodeberg => {
+                let owner = call.params.get("owner").map(|s| s.as_str()).unwrap_or("");
+                let repo = call.params.get("repo").map(|s| s.as_str()).unwrap_or("");
+                let url = format!(
+                    "https://codeberg.org/{}/{}/archive/{}.tar.gz",
+                    owner, repo, rev
+                );
+                TarballHasher::hash_tarball_url(&url)
+            }
+            _ => anyhow::bail!("Unsupported fetcher for tarball hashing"),
+        }
+    }
+
+    fn compute_git_hash(call: &FetcherCall, rev: &str) -> Result<NarHash> {
+        let git_url = match call.kind.git_url(&call.params) {
+            Some(url) => url,
+            None => anyhow::bail!("No git URL available"),
+        };
+        let use_submodules = call.kind.uses_fetch_submodules(&call.params);
+        let prefetch = if use_submodules {
+            NixPrefetcher::prefetch_git_with_submodules(&git_url, rev)?
+        } else {
+            NixPrefetcher::prefetch_git(&git_url, rev)?
+        };
+        Ok(NarHash {
+            sri: prefetch.sri_hash,
+            nix32: prefetch.sha256_nix,
+            hex: String::new(),
+        })
     }
 }
 
@@ -471,7 +555,7 @@ impl UpdateRule for FetcherRule {
         let mut all_updates = Vec::new();
 
         for call in Self::extract_fetcher_calls(node) {
-            if let Some(updates) = Self::check_fetcher_call(&call)? {
+            if let Some(updates) = self.check_fetcher_call(&call)? {
                 all_updates.extend(updates);
             }
         }

@@ -21,12 +21,19 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 walkdir = "2.5.0"
 rayon = "1"
+nix-nar = "0.3"
+sha2 = "0.10"
+nix-base32 = "0.2"
+flate2 = "1"
+tar = "0.4"
+ureq = "3"
+base64 = "0.22"
+tempfile = "3.10"
 
 [features]
 network-tests = []
 
 [dev-dependencies]
-tempfile = "3.10"
 assert_cmd = "2.0"
 predicates = "3.0"
 insta = { version = "1", features = ["glob"] }
