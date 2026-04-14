@@ -8,20 +8,28 @@ pub struct PrefetchResult {
     pub rev: String,
 }
 
+#[derive(Debug, Default)]
+pub struct GitPrefetchArgs {
+    pub fetch_submodules: bool,
+    pub deep_clone: bool,
+    pub leave_dot_git: bool,
+    pub fetch_lfs: bool,
+    pub branch_name: Option<String>,
+    pub root_dir: Option<String>,
+    pub sparse_checkout: Vec<String>,
+}
+
 pub struct NixPrefetcher;
 
 impl NixPrefetcher {
     fn prefetch_git_inner(
+        args: &[String],
         url: &str,
         rev: &str,
-        extra_args: &[&str],
         label: &str,
     ) -> Result<PrefetchResult> {
-        let mut args = vec!["--url", url, "--rev", rev, "--quiet"];
-        args.extend(extra_args);
-
         let output = Command::new("nix-prefetch-git")
-            .args(&args)
+            .args(args)
             .output()
             .with_context(|| {
                 format!(
@@ -51,12 +59,55 @@ impl NixPrefetcher {
         parse_prefetch_json(&stdout)
     }
 
-    pub fn prefetch_git(url: &str, rev: &str) -> Result<PrefetchResult> {
-        Self::prefetch_git_inner(url, rev, &[], "")
-    }
+    pub fn prefetch_git(
+        url: &str,
+        rev: &str,
+        git_args: &GitPrefetchArgs,
+    ) -> Result<PrefetchResult> {
+        let mut args = vec![
+            "--url".to_string(),
+            url.to_string(),
+            "--rev".to_string(),
+            rev.to_string(),
+            "--quiet".to_string(),
+            "--no-add-path".to_string(),
+        ];
 
-    pub fn prefetch_git_with_submodules(url: &str, rev: &str) -> Result<PrefetchResult> {
-        Self::prefetch_git_inner(url, rev, &["--fetch-submodules"], "(with submodules) ")
+        let mut label_parts = Vec::new();
+
+        if git_args.fetch_submodules {
+            args.push("--fetch-submodules".to_string());
+            label_parts.push("with submodules");
+        }
+        if git_args.deep_clone {
+            args.push("--deepClone".to_string());
+        }
+        if git_args.leave_dot_git {
+            args.push("--leave-dotGit".to_string());
+        }
+        if git_args.fetch_lfs {
+            args.push("--fetch-lfs".to_string());
+        }
+        if let Some(ref branch_name) = git_args.branch_name {
+            args.push("--branch-name".to_string());
+            args.push(branch_name.clone());
+        }
+        if let Some(ref root_dir) = git_args.root_dir {
+            args.push("--root-dir".to_string());
+            args.push(root_dir.clone());
+        }
+        for path in &git_args.sparse_checkout {
+            args.push("--sparse-checkout".to_string());
+            args.push(path.clone());
+        }
+
+        let label = if label_parts.is_empty() {
+            String::new()
+        } else {
+            format!("({}) ", label_parts.join(", "))
+        };
+
+        Self::prefetch_git_inner(&args, url, rev, &label)
     }
 
     pub fn prefetch_archive(url: &str) -> Result<String> {

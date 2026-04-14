@@ -18,6 +18,7 @@ struct FetcherCall {
     source_ranges: HashMap<String, TextRange>,
     pinned: bool,
     follow_branch: Option<String>,
+    sparse_checkout: Vec<String>,
 }
 
 pub struct FetcherRule;
@@ -55,6 +56,7 @@ impl FetcherRule {
 
             let mut params = HashMap::new();
             let mut source_ranges = HashMap::new();
+            let mut sparse_checkout = Vec::new();
 
             for child in arg.children() {
                 if child.kind() != rnix::SyntaxKind::NODE_ATTRPATH_VALUE {
@@ -78,6 +80,15 @@ impl FetcherRule {
                         if trimmed == "true" || trimmed == "false" {
                             params.insert(key.clone(), trimmed.to_string());
                         }
+                    } else if key == "sparseCheckout" && value.kind() == rnix::SyntaxKind::NODE_LIST
+                    {
+                        for item in value.children() {
+                            if item.kind() == rnix::SyntaxKind::NODE_STRING
+                                && let Some(content) = item.string_content()
+                            {
+                                sparse_checkout.push(content);
+                            }
+                        }
                     }
                 }
             }
@@ -93,6 +104,7 @@ impl FetcherRule {
                 source_ranges,
                 pinned,
                 follow_branch,
+                sparse_checkout,
             });
         }
         calls
@@ -308,9 +320,12 @@ impl FetcherRule {
     }
 
     fn compute_hash(call: &FetcherCall, rev: &str) -> Result<NarHash> {
-        match call.kind.hash_strategy(&call.params) {
+        let has_sparse_checkout = !call.sparse_checkout.is_empty();
+        match call.kind.hash_strategy(&call.params, has_sparse_checkout) {
             HashStrategy::Tarball => tarball::compute_hash(&call.kind, &call.params, rev),
-            HashStrategy::Git => git_fetch::compute_hash(&call.kind, &call.params, rev),
+            HashStrategy::Git => {
+                git_fetch::compute_hash(&call.kind, &call.params, rev, &call.sparse_checkout)
+            }
             HashStrategy::None => anyhow::bail!("No hash needed for this fetcher"),
         }
     }

@@ -67,11 +67,15 @@ impl FetcherKind {
         !matches!(self, Self::BuiltinsFetchGit)
     }
 
-    pub fn hash_strategy(&self, params: &HashMap<String, String>) -> HashStrategy {
+    pub fn hash_strategy(
+        &self,
+        params: &HashMap<String, String>,
+        has_sparse_checkout: bool,
+    ) -> HashStrategy {
         if !self.needs_hash() {
             return HashStrategy::None;
         }
-        if self.uses_tarball(params) {
+        if self.uses_tarball(params, has_sparse_checkout) {
             HashStrategy::Tarball
         } else {
             HashStrategy::Git
@@ -143,11 +147,15 @@ impl FetcherKind {
         }
     }
 
-    pub fn uses_tarball(&self, params: &HashMap<String, String>) -> bool {
+    pub fn uses_tarball(
+        &self,
+        params: &HashMap<String, String>,
+        has_sparse_checkout: bool,
+    ) -> bool {
         matches!(
             self,
             Self::FetchFromGitHub | Self::FetchFromGitLab | Self::FetchFromCodeberg
-        ) && !self.uses_fetchgit(params)
+        ) && !self.uses_fetchgit(params, has_sparse_checkout)
             && !self.uses_fetch_submodules(params)
     }
 
@@ -170,9 +178,8 @@ impl FetcherKind {
         }
     }
 
-    fn uses_fetchgit(&self, params: &HashMap<String, String>) -> bool {
+    fn uses_fetchgit(&self, params: &HashMap<String, String>, has_sparse_checkout: bool) -> bool {
         match self {
-            // https://nixos.org/manual/nixpkgs/stable/#chap-pkgs-fetchers
             Self::FetchGit => true,
             Self::FetchFromGitHub
             | Self::FetchFromGitLab
@@ -190,11 +197,8 @@ impl FetcherKind {
                     || params.get("fetchLFS").is_some_and(|v| v == "true")
                     || params.get("fetchSubmodules").is_some_and(|v| v == "true")
                     || params.get("rootDir").is_some_and(|v| !v.is_empty())
-                // TODO: also true when sparseCheckout is an non-empty list
-                // But it does not fit well with current hashmap structure.
-                // Can add it later when we properly handle attr set.
+                    || has_sparse_checkout
             }
-            // https://noogle.dev/f/builtins/fetchGit
             Self::BuiltinsFetchGit => true,
         }
     }
@@ -398,148 +402,169 @@ mod tests {
     #[test]
     fn test_uses_fetchgit_always_true() {
         let params = HashMap::new();
-        assert!(FetcherKind::FetchGit.uses_fetchgit(&params));
-        assert!(FetcherKind::BuiltinsFetchGit.uses_fetchgit(&params));
+        assert!(FetcherKind::FetchGit.uses_fetchgit(&params, false));
+        assert!(FetcherKind::BuiltinsFetchGit.uses_fetchgit(&params, false));
     }
 
     #[test]
     fn test_uses_fetchgit_force_fetch_git() {
         let mut params = HashMap::new();
         params.insert("forceFetchGit".to_string(), "true".to_string());
-        assert!(FetcherKind::FetchFromGitHub.uses_fetchgit(&params));
-        assert!(FetcherKind::FetchFromGitLab.uses_fetchgit(&params));
-        assert!(FetcherKind::FetchFromGitea.uses_fetchgit(&params));
-        assert!(FetcherKind::FetchFromForgejo.uses_fetchgit(&params));
-        assert!(FetcherKind::FetchFromCodeberg.uses_fetchgit(&params));
-        assert!(FetcherKind::FetchFromBitbucket.uses_fetchgit(&params));
-        assert!(FetcherKind::FetchFromSavannah.uses_fetchgit(&params));
-        assert!(FetcherKind::FetchFromSourcehut.uses_fetchgit(&params));
-        assert!(FetcherKind::FetchFromGitiles.uses_fetchgit(&params));
-        assert!(FetcherKind::FetchFromRepoOrCz.uses_fetchgit(&params));
+        assert!(FetcherKind::FetchFromGitHub.uses_fetchgit(&params, false));
+        assert!(FetcherKind::FetchFromGitLab.uses_fetchgit(&params, false));
+        assert!(FetcherKind::FetchFromGitea.uses_fetchgit(&params, false));
+        assert!(FetcherKind::FetchFromForgejo.uses_fetchgit(&params, false));
+        assert!(FetcherKind::FetchFromCodeberg.uses_fetchgit(&params, false));
+        assert!(FetcherKind::FetchFromBitbucket.uses_fetchgit(&params, false));
+        assert!(FetcherKind::FetchFromSavannah.uses_fetchgit(&params, false));
+        assert!(FetcherKind::FetchFromSourcehut.uses_fetchgit(&params, false));
+        assert!(FetcherKind::FetchFromGitiles.uses_fetchgit(&params, false));
+        assert!(FetcherKind::FetchFromRepoOrCz.uses_fetchgit(&params, false));
     }
 
     #[test]
     fn test_uses_fetchgit_leave_dot_git() {
         let mut params = HashMap::new();
         params.insert("leaveDotGit".to_string(), "true".to_string());
-        assert!(FetcherKind::FetchFromGitHub.uses_fetchgit(&params));
+        assert!(FetcherKind::FetchFromGitHub.uses_fetchgit(&params, false));
     }
 
     #[test]
     fn test_uses_fetchgit_deep_clone() {
         let mut params = HashMap::new();
         params.insert("deepClone".to_string(), "true".to_string());
-        assert!(FetcherKind::FetchFromGitHub.uses_fetchgit(&params));
+        assert!(FetcherKind::FetchFromGitHub.uses_fetchgit(&params, false));
     }
 
     #[test]
     fn test_uses_fetchgit_fetch_lfs() {
         let mut params = HashMap::new();
         params.insert("fetchLFS".to_string(), "true".to_string());
-        assert!(FetcherKind::FetchFromGitHub.uses_fetchgit(&params));
+        assert!(FetcherKind::FetchFromGitHub.uses_fetchgit(&params, false));
     }
 
     #[test]
     fn test_uses_fetchgit_fetch_submodules() {
         let mut params = HashMap::new();
         params.insert("fetchSubmodules".to_string(), "true".to_string());
-        assert!(FetcherKind::FetchFromGitHub.uses_fetchgit(&params));
+        assert!(FetcherKind::FetchFromGitHub.uses_fetchgit(&params, false));
     }
 
     #[test]
     fn test_uses_fetchgit_root_dir() {
         let mut params = HashMap::new();
         params.insert("rootDir".to_string(), "/some/path".to_string());
-        assert!(FetcherKind::FetchFromGitHub.uses_fetchgit(&params));
+        assert!(FetcherKind::FetchFromGitHub.uses_fetchgit(&params, false));
 
         let mut params = HashMap::new();
         params.insert("rootDir".to_string(), String::new());
-        assert!(!FetcherKind::FetchFromGitHub.uses_fetchgit(&params));
+        assert!(!FetcherKind::FetchFromGitHub.uses_fetchgit(&params, false));
+    }
+
+    #[test]
+    fn test_uses_fetchgit_sparse_checkout() {
+        let params = HashMap::new();
+        assert!(FetcherKind::FetchFromGitHub.uses_fetchgit(&params, true));
+        assert!(FetcherKind::FetchFromGitLab.uses_fetchgit(&params, true));
+        assert!(FetcherKind::FetchFromCodeberg.uses_fetchgit(&params, true));
+
+        let params = HashMap::new();
+        assert!(!FetcherKind::FetchFromGitHub.uses_fetchgit(&params, false));
+        assert!(!FetcherKind::FetchFromGitLab.uses_fetchgit(&params, false));
+        assert!(!FetcherKind::FetchFromCodeberg.uses_fetchgit(&params, false));
     }
 
     #[test]
     fn test_uses_fetchgit_false_when_no_trigger_params() {
         let params = HashMap::new();
-        assert!(!FetcherKind::FetchFromGitHub.uses_fetchgit(&params));
-        assert!(!FetcherKind::FetchFromGitLab.uses_fetchgit(&params));
-        assert!(!FetcherKind::FetchFromCodeberg.uses_fetchgit(&params));
+        assert!(!FetcherKind::FetchFromGitHub.uses_fetchgit(&params, false));
+        assert!(!FetcherKind::FetchFromGitLab.uses_fetchgit(&params, false));
+        assert!(!FetcherKind::FetchFromCodeberg.uses_fetchgit(&params, false));
 
         let mut params = HashMap::new();
         params.insert("forceFetchGit".to_string(), "false".to_string());
-        assert!(!FetcherKind::FetchFromGitHub.uses_fetchgit(&params));
+        assert!(!FetcherKind::FetchFromGitHub.uses_fetchgit(&params, false));
 
         let mut params = HashMap::new();
         params.insert("leaveDotGit".to_string(), "false".to_string());
-        assert!(!FetcherKind::FetchFromGitHub.uses_fetchgit(&params));
+        assert!(!FetcherKind::FetchFromGitHub.uses_fetchgit(&params, false));
 
         let mut params = HashMap::new();
         params.insert("deepClone".to_string(), "false".to_string());
-        assert!(!FetcherKind::FetchFromGitHub.uses_fetchgit(&params));
+        assert!(!FetcherKind::FetchFromGitHub.uses_fetchgit(&params, false));
 
         let mut params = HashMap::new();
         params.insert("fetchLFS".to_string(), "false".to_string());
-        assert!(!FetcherKind::FetchFromGitHub.uses_fetchgit(&params));
+        assert!(!FetcherKind::FetchFromGitHub.uses_fetchgit(&params, false));
 
         let mut params = HashMap::new();
         params.insert("fetchSubmodules".to_string(), "false".to_string());
-        assert!(!FetcherKind::FetchFromGitHub.uses_fetchgit(&params));
+        assert!(!FetcherKind::FetchFromGitHub.uses_fetchgit(&params, false));
     }
 
     #[test]
     fn test_uses_tarball_github_gitlab_codeberg() {
         let params = HashMap::new();
-        assert!(FetcherKind::FetchFromGitHub.uses_tarball(&params));
-        assert!(FetcherKind::FetchFromGitLab.uses_tarball(&params));
-        assert!(FetcherKind::FetchFromCodeberg.uses_tarball(&params));
+        assert!(FetcherKind::FetchFromGitHub.uses_tarball(&params, false));
+        assert!(FetcherKind::FetchFromGitLab.uses_tarball(&params, false));
+        assert!(FetcherKind::FetchFromCodeberg.uses_tarball(&params, false));
 
-        assert!(!FetcherKind::FetchGit.uses_tarball(&params));
-        assert!(!FetcherKind::FetchFromGitea.uses_tarball(&params));
-        assert!(!FetcherKind::FetchFromForgejo.uses_tarball(&params));
-        assert!(!FetcherKind::FetchFromSourcehut.uses_tarball(&params));
-        assert!(!FetcherKind::FetchFromBitbucket.uses_tarball(&params));
-        assert!(!FetcherKind::FetchFromGitiles.uses_tarball(&params));
-        assert!(!FetcherKind::FetchFromSavannah.uses_tarball(&params));
-        assert!(!FetcherKind::FetchFromRepoOrCz.uses_tarball(&params));
-        assert!(!FetcherKind::BuiltinsFetchGit.uses_tarball(&params));
+        assert!(!FetcherKind::FetchGit.uses_tarball(&params, false));
+        assert!(!FetcherKind::FetchFromGitea.uses_tarball(&params, false));
+        assert!(!FetcherKind::FetchFromForgejo.uses_tarball(&params, false));
+        assert!(!FetcherKind::FetchFromSourcehut.uses_tarball(&params, false));
+        assert!(!FetcherKind::FetchFromBitbucket.uses_tarball(&params, false));
+        assert!(!FetcherKind::FetchFromGitiles.uses_tarball(&params, false));
+        assert!(!FetcherKind::FetchFromSavannah.uses_tarball(&params, false));
+        assert!(!FetcherKind::FetchFromRepoOrCz.uses_tarball(&params, false));
+        assert!(!FetcherKind::BuiltinsFetchGit.uses_tarball(&params, false));
     }
 
     #[test]
     fn test_uses_tarball_disabled_by_fetchgit_flags() {
         let mut params = HashMap::new();
         params.insert("forceFetchGit".to_string(), "true".to_string());
-        assert!(!FetcherKind::FetchFromGitHub.uses_tarball(&params));
-        assert!(!FetcherKind::FetchFromGitLab.uses_tarball(&params));
-        assert!(!FetcherKind::FetchFromCodeberg.uses_tarball(&params));
+        assert!(!FetcherKind::FetchFromGitHub.uses_tarball(&params, false));
+        assert!(!FetcherKind::FetchFromGitLab.uses_tarball(&params, false));
+        assert!(!FetcherKind::FetchFromCodeberg.uses_tarball(&params, false));
 
         let mut params = HashMap::new();
         params.insert("fetchSubmodules".to_string(), "true".to_string());
-        assert!(!FetcherKind::FetchFromGitHub.uses_tarball(&params));
+        assert!(!FetcherKind::FetchFromGitHub.uses_tarball(&params, false));
 
         let mut params = HashMap::new();
         params.insert("deepClone".to_string(), "true".to_string());
-        assert!(!FetcherKind::FetchFromGitHub.uses_tarball(&params));
+        assert!(!FetcherKind::FetchFromGitHub.uses_tarball(&params, false));
+    }
+
+    #[test]
+    fn test_uses_tarball_disabled_by_sparse_checkout() {
+        let params = HashMap::new();
+        assert!(!FetcherKind::FetchFromGitHub.uses_tarball(&params, true));
+        assert!(!FetcherKind::FetchFromGitLab.uses_tarball(&params, true));
+        assert!(!FetcherKind::FetchFromCodeberg.uses_tarball(&params, true));
     }
 
     #[test]
     fn test_hash_strategy() {
         let params = HashMap::new();
         assert_eq!(
-            FetcherKind::FetchFromGitHub.hash_strategy(&params),
+            FetcherKind::FetchFromGitHub.hash_strategy(&params, false),
             HashStrategy::Tarball
         );
         assert_eq!(
-            FetcherKind::FetchGit.hash_strategy(&params),
+            FetcherKind::FetchGit.hash_strategy(&params, false),
             HashStrategy::Git
         );
         assert_eq!(
-            FetcherKind::BuiltinsFetchGit.hash_strategy(&params),
+            FetcherKind::BuiltinsFetchGit.hash_strategy(&params, false),
             HashStrategy::None
         );
 
         let mut params = HashMap::new();
         params.insert("forceFetchGit".to_string(), "true".to_string());
         assert_eq!(
-            FetcherKind::FetchFromGitHub.hash_strategy(&params),
+            FetcherKind::FetchFromGitHub.hash_strategy(&params, false),
             HashStrategy::Git
         );
     }
