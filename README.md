@@ -7,7 +7,7 @@ Update git references in Nix flake files and Nix expressions.
 ## Features
 
 - **Flake inputs**: update `ref` values and inline `?ref=` in URL strings
-- **Fetcher calls**: update `rev`, `tag`, and `ref` in `fetchgit`, `fetchFromGitHub`, `fetchFromGitLab`, `fetchFromGitea`, `fetchFromForgejo`, `fetchFromCodeberg`, `fetchFromSourcehut`, `fetchFromBitbucket`, `fetchFromSavannah`, `fetchFromRepoOrCz`, `fetchFrom9Front`, `fetchFromGitiles`, and `builtins.fetchGit`
+- **Fetcher calls**: update `rev`, `tag`, and `ref` in `fetchgit`, `fetchFromGitHub`, `fetchFromGitLab`, `fetchFromGitea`, `fetchFromForgejo`, `fetchFromCodeberg`, `fetchFromSourcehut`, `fetchFromBitbucket`, `fetchFromSavannah`, `fetchFromRepoOrCz`, `fetchFromGitiles`, and `builtins.fetchGit`
 - **Branch following**: use `# follow:<branch>` comments to track a branch's latest commit instead of version tags
 - **Pinning**: `# pin` comments on any input or fetcher call skips it entirely
 - **Multiple modes**: check (default), update, and interactive
@@ -129,7 +129,7 @@ src = pkgs.fetchFromGitHub {
 };
 ```
 
-All standard nixpkgs fetchers are supported (`fetchgit`, `fetchFromGitHub`, `fetchFromGitLab`, `fetchFromGitea`, `fetchFromForgejo`, `fetchFromCodeberg`, `fetchFromSourcehut`, `fetchFromBitbucket`, `fetchFromGitiles`, `fetchFromSavannah`, `fetchFromRepoOrCz`, `fetchFrom9Front`, `builtins.fetchGit`).
+All standard nixpkgs fetchers are supported (`fetchgit`, `fetchFromGitHub`, `fetchFromGitLab`, `fetchFromGitea`, `fetchFromForgejo`, `fetchFromCodeberg`, `fetchFromSourcehut`, `fetchFromBitbucket`, `fetchFromGitiles`, `fetchFromSavannah`, `fetchFromRepoOrCz`, `builtins.fetchGit`).
 
 ### Branch following
 

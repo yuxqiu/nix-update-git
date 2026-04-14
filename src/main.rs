@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::Parser;
 use nix_update_git::cli::OutputFormat;
-use nix_update_git::rules::{FetcherRule, FlakeInputRule, RuleRegistry};
+use nix_update_git::rules::{FetcherRule, FlakeInputRule, MkDerivationRule, RuleRegistry};
 use rayon::prelude::*;
 use walkdir::WalkDir;
 
@@ -68,6 +68,7 @@ fn main() -> Result<()> {
     let mut registry = RuleRegistry::new();
     registry.register(FlakeInputRule::new());
     registry.register(FetcherRule::new());
+    registry.register(MkDerivationRule::new());
 
     let results: Vec<_> = files.par_iter().map(|p| check_file(p, &registry)).collect();
 
