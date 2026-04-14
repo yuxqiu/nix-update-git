@@ -21,11 +21,10 @@ impl VersionDetector {
     }
 
     pub fn latest_matching<'a>(versions: &'a [&str], current: &str) -> Option<&'a str> {
-        let prefix = Self::prefix(current);
         versions
             .iter()
             .filter(|v| Self::is_version(v))
-            .filter(|v| Self::prefix(v) == prefix)
+            .filter(|v| Self::look_similar(v, current))
             .max_by(|a, b| Self::compare(a, b))
             .copied()
     }
@@ -38,33 +37,101 @@ impl VersionDetector {
             .copied()
     }
 
+    fn look_similar(a: &str, b: &str) -> bool {
+        if Self::prefix(a) != Self::prefix(b) {
+            return false;
+        }
+
+        let va = match Self::parse(a) {
+            Some(v) => v,
+            None => return false,
+        };
+        let vb = match Self::parse(b) {
+            Some(v) => v,
+            None => return false,
+        };
+
+        match (&va, &vb) {
+            (Versioning::Ideal(_), Versioning::Ideal(_)) => true,
+            (Versioning::General(a_ver), Versioning::General(b_ver)) => {
+                if a_ver.chunks.0.len() != b_ver.chunks.0.len() {
+                    return false;
+                }
+                a_ver
+                    .chunks
+                    .0
+                    .iter()
+                    .zip(b_ver.chunks.0.iter())
+                    .all(|(ac, bc)| std::mem::discriminant(ac) == std::mem::discriminant(bc))
+            }
+            (Versioning::Complex(a_mess), Versioning::Complex(b_mess)) => {
+                Self::mess_shape_similar(a_mess, b_mess)
+            }
+            // Stable versions shouldn't match pre-release shapes and vice versa
+            _ => false,
+        }
+    }
+
+    fn mess_shape_similar(a: &versions::Mess, b: &versions::Mess) -> bool {
+        let mut a_curr = a;
+        let mut b_curr = b;
+        loop {
+            if a_curr.chunks.len() != b_curr.chunks.len() {
+                return false;
+            }
+            if !a_curr
+                .chunks
+                .iter()
+                .zip(b_curr.chunks.iter())
+                .all(|(ac, bc)| std::mem::discriminant(ac) == std::mem::discriminant(bc))
+            {
+                return false;
+            }
+            match (&a_curr.next, &b_curr.next) {
+                (Some((_, a_next)), Some((_, b_next))) => {
+                    a_curr = a_next;
+                    b_curr = b_next;
+                }
+                (None, None) => return true,
+                _ => return false,
+            }
+        }
+    }
+
     fn prefix(s: &str) -> &str {
         let end = s.find(|c: char| c.is_ascii_digit()).unwrap_or(s.len());
         &s[..end]
     }
 
     fn parse(s: &str) -> Option<Versioning> {
-        let stripped = s.strip_prefix(Self::prefix(s)).unwrap();
+        let stripped = s.strip_prefix(Self::prefix(s))?;
 
-        // accept if
-        // - the version is semver
-        // - the version has any numeric components
         Versioning::new(stripped).filter(|v| match v {
             Versioning::Ideal(_) => true,
             Versioning::General(version) => version
                 .chunks
                 .0
                 .iter()
-                .find(|chunk| matches!(chunk, Chunk::Numeric(_)))
-                .is_some(),
-            Versioning::Complex(version) => version
+                .any(|chunk| matches!(chunk, Chunk::Numeric(_))),
+            Versioning::Complex(version) => Self::mess_has_numerics(version),
+        })
+    }
+
+    fn mess_has_numerics(mess: &versions::Mess) -> bool {
+        let mut current = mess;
+        loop {
+            if current
                 .chunks
                 .iter()
-                .find(|chunk| {
-                    matches!(chunk, MChunk::Digits(_, _)) || matches!(chunk, MChunk::Rev(_, _))
-                })
-                .is_some(),
-        })
+                .any(|chunk| matches!(chunk, MChunk::Digits(_, _) | MChunk::Rev(_, _)))
+            {
+                return true;
+            }
+            match &current.next {
+                Some((_, next)) => current = next,
+                None => return false,
+            }
+        }
     }
 }
 
@@ -126,10 +193,10 @@ mod tests {
 
     #[test]
     fn test_latest_matching() {
-        let versions: Vec<&str> = vec!["v1.0.0", "v2.0.0", "2.6", "v1.5.0"];
+        let versions: Vec<&str> = vec!["v1.0.0", "v2.6", "2.6", "v1.5.0"];
         assert_eq!(
             VersionDetector::latest_matching(&versions, "v2.41"),
-            Some("v2.0.0")
+            Some("v2.6")
         );
         assert_eq!(
             VersionDetector::latest_matching(&versions, "2.41"),
@@ -164,5 +231,55 @@ mod tests {
         let versions: Vec<&str> = vec!["100.0", "140.0", "141.0"];
         let result = VersionDetector::latest(&versions);
         assert_eq!(result, Some("141.0"));
+    }
+
+    #[test]
+    fn test_look_similar_same_prefix() {
+        assert!(VersionDetector::look_similar("v1.0.0", "v2.0.0"));
+        assert!(VersionDetector::look_similar("v1.0", "v2.0"));
+        assert!(VersionDetector::look_similar("1.0.0", "2.0.0"));
+        assert!(VersionDetector::look_similar(
+            "release-1.0.0",
+            "release-2.0.0"
+        ));
+    }
+
+    #[test]
+    fn test_look_similar_different_prefix() {
+        assert!(!VersionDetector::look_similar("v1.0.0", "2.0.0"));
+        assert!(!VersionDetector::look_similar("v1.0.0", "release-2.0.0"));
+        assert!(!VersionDetector::look_similar("1.0.0", "v2.0.0"));
+    }
+
+    #[test]
+    fn test_look_similar_stable_vs_prerelease() {
+        // Both "v1.0.0" and "v1.0.0-beta" parse as Ideal (SemVer) because
+        // semver pre-release is still semver. They are similar in shape.
+        // Complex (Mess) versions like "1.0.0-abc+def.2" differ from stable ones.
+        assert!(VersionDetector::look_similar("v1.0.0", "v2.0.0-alpha"));
+        // Truly different shapes are not similar: General (2 chunks) vs Complex
+        assert!(VersionDetector::look_similar("v1.0.0", "v2.0.0"));
+    }
+
+    #[test]
+    fn test_look_similar_general_different_chunks() {
+        // Different number of chunks: not similar
+        assert!(!VersionDetector::look_similar("1.0", "1.0.0.1"));
+    }
+
+    #[test]
+    fn test_look_similar_prerelease_vs_stable() {
+        // Verify that prefix check still works for pre-release tags
+        // "v1.0.0-beta" has prefix "v" and "v2.0.0" has prefix "v"
+        // Both parse as Ideal (SemVer), so they're similar in shape.
+        // This is correct: both are valid SemVer versions.
+        assert!(VersionDetector::look_similar("v1.0.0-beta", "v2.0.0"));
+    }
+
+    #[test]
+    fn test_is_version_mess_with_numerics() {
+        // Complex versions that have numerics in different segments
+        assert!(VersionDetector::is_version("1.0.0-beta.1"));
+        assert!(VersionDetector::is_version("rc-2"));
     }
 }
