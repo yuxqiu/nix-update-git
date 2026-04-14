@@ -8,13 +8,22 @@ pub struct TestRepo {
 }
 
 fn run_git(args: &[&str], current_dir: &Path) -> std::process::Output {
-    std::process::Command::new("git")
+    let output = std::process::Command::new("git")
         .args(args)
         .current_dir(current_dir)
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .output()
-        .expect("failed to run git")
+        .expect("failed to run git");
+    if !output.status.success() {
+        panic!(
+            "git {:?} failed in {}: {}",
+            args,
+            current_dir.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    output
 }
 
 impl TestRepo {

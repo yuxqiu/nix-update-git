@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use versions::Versioning;
+use versions::{Chunk, MChunk, Versioning};
 
 pub struct VersionDetector;
 
@@ -44,10 +44,27 @@ impl VersionDetector {
     }
 
     fn parse(s: &str) -> Option<Versioning> {
-        if !s.contains(|c: char| c.is_ascii_digit()) {
-            return None;
-        }
-        Versioning::new(s)
+        let stripped = s.strip_prefix(Self::prefix(s)).unwrap();
+
+        // accept if
+        // - the version is semver
+        // - the version has any numeric components
+        Versioning::new(stripped).filter(|v| match v {
+            Versioning::Ideal(_) => true,
+            Versioning::General(version) => version
+                .chunks
+                .0
+                .iter()
+                .find(|chunk| matches!(chunk, Chunk::Numeric(_)))
+                .is_some(),
+            Versioning::Complex(version) => version
+                .chunks
+                .iter()
+                .find(|chunk| {
+                    matches!(chunk, MChunk::Digits(_, _)) || matches!(chunk, MChunk::Rev(_, _))
+                })
+                .is_some(),
+        })
     }
 }
 
@@ -64,14 +81,20 @@ mod tests {
         assert!(VersionDetector::is_version("140.0"));
         assert!(VersionDetector::is_version("v140.0"));
         assert!(VersionDetector::is_version("100"));
-        assert!(VersionDetector::is_version("1.2.3.4"));
+        assert!(VersionDetector::is_version("100"));
+
+        assert!(!VersionDetector::is_version("main"));
+        assert!(!VersionDetector::is_version("master"));
+        assert!(!VersionDetector::is_version(
+            "0f14e030b3a9391e761c03ce3c260730a78a4db6"
+        ));
+
         assert!(VersionDetector::is_version("25.01"));
-        assert!(VersionDetector::is_version("2025.01"));
         assert!(VersionDetector::is_version("2025.01"));
         assert!(VersionDetector::is_version("2025.01.01"));
         assert!(VersionDetector::is_version("2025.01.01.123456"));
-        assert!(!VersionDetector::is_version("main"));
-        assert!(!VersionDetector::is_version("master"));
+
+        assert!(VersionDetector::is_version("1.2.3.4"));
     }
 
     #[test]
@@ -88,6 +111,7 @@ mod tests {
         assert_eq!(VersionDetector::compare("v1.0.0", "v1.0.1"), Ordering::Less);
         assert_eq!(VersionDetector::compare("140.0", "141.0"), Ordering::Less);
         assert_eq!(VersionDetector::compare("100", "200"), Ordering::Less);
+        assert_eq!(VersionDetector::compare("2.41", "2.6"), Ordering::Greater);
     }
 
     #[test]

@@ -46,7 +46,10 @@ pub fn print_updates(fr: &FileResult) {
 }
 
 pub fn print_json(entries: &[UpdateEntry]) {
-    println!("{}", serde_json::to_string_pretty(entries).unwrap());
+    match serde_json::to_string_pretty(entries) {
+        Ok(json) => println!("{json}"),
+        Err(e) => eprintln!("Error serializing JSON: {e}"),
+    }
 }
 
 fn prompt_confirmation(update: &Update, old_text: &str) -> bool {

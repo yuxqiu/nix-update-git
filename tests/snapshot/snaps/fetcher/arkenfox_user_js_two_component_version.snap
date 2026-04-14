@@ -7,11 +7,19 @@ input_file: tests/snapshot/data/fetcher/arkenfox_user_js_two_component_version.n
   {
     "rule": "fetcher",
     "field": "fetchFromGitHub.rev",
-    "old": "\"140.0\""
+    "old": "\"140.0\"",
+    "range": [
+      103,
+      110
+    ]
   },
   {
     "rule": "fetcher",
     "field": "fetchFromGitHub.hash",
-    "old": "\"sha256-LPDiiEPOZu5Ah5vCLyCMT3w1uoBhUjyqoPWCOiLVLnw=\""
+    "old": "\"sha256-LPDiiEPOZu5Ah5vCLyCMT3w1uoBhUjyqoPWCOiLVLnw=\"",
+    "range": [
+      123,
+      176
+    ]
   }
 ]

@@ -157,6 +157,22 @@ fn test_follow_branch_comment_absent() {
 }
 
 #[test]
+fn test_follow_branch_comment_present() {
+    let content = "{ src = fetchgit { # follow:main\n    url = \"https://example.com/repo\"; rev = \"abc123\"; }; }";
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    for node in attr_set.traverse() {
+        if node.kind() == rnix::SyntaxKind::NODE_ATTR_SET
+            && let Some(branch) = node.follow_branch_comment()
+        {
+            assert_eq!(branch, "main".to_string());
+            return;
+        }
+    }
+    panic!("Expected to find follow:main comment on attr set node");
+}
+
+#[test]
 fn test_apply_function_name_simple() {
     let content = "{ src = fetchgit { url = \"...\"; }; }";
     let root = parse(content);

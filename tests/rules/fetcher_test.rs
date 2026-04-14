@@ -337,6 +337,9 @@ fn test_fetcher_sha256_attribute() {
 
     let mut cmd = Command::cargo_bin("nix-update-git").unwrap();
     cmd.arg("--verbose").arg(nix_path.to_str().unwrap());
+    cmd.assert()
+        .success()
+        .stdout(predicates::str::contains("fetchgit.rev"));
 }
 
 #[test]
@@ -348,9 +351,9 @@ fn test_fetcher_follow_branch_comment() {
 
     let nix_content = format!(
         r#"{{
-  src = fetchgit {{ # follow:master
+  src = fetchgit {{
     url = "{}";
-    rev = "{}";
+    rev = "{}"; # follow:master
     hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   }};
 }}"#,
@@ -365,16 +368,21 @@ fn test_fetcher_follow_branch_comment() {
     let mut cmd = Command::cargo_bin("nix-update-git").unwrap();
     cmd.arg("--verbose").arg(nix_path.to_str().unwrap());
     let output = cmd.output().unwrap();
+    assert!(
+        output.status.success(),
+        "Command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("fetchgit.rev") || output.status.success(),
+        stdout.contains("fetchgit.rev"),
         "Expected to detect update for follow:master, got stdout: {}, stderr: {}",
         stdout,
         String::from_utf8_lossy(&output.stderr)
     );
 }
 
-#[cfg(feature = "network-tests")]
+#[cfg_attr(not(feature = "network-tests"), ignore)]
 #[test]
 fn test_fetcher_fetch_from_gitea() {
     let nix_content = r#"{
@@ -394,7 +402,7 @@ fn test_fetcher_fetch_from_gitea() {
     cmd.arg("--verbose").arg(nix_path.to_str().unwrap());
 }
 
-#[cfg(feature = "network-tests")]
+#[cfg_attr(not(feature = "network-tests"), ignore)]
 #[test]
 fn test_fetcher_fetch_from_sourcehut() {
     let nix_content = r#"{
@@ -413,7 +421,7 @@ fn test_fetcher_fetch_from_sourcehut() {
     cmd.arg("--verbose").arg(nix_path.to_str().unwrap());
 }
 
-#[cfg(feature = "network-tests")]
+#[cfg_attr(not(feature = "network-tests"), ignore)]
 #[test]
 fn test_fetcher_fetch_from_bitbucket() {
     let nix_content = r#"{
@@ -432,7 +440,7 @@ fn test_fetcher_fetch_from_bitbucket() {
     cmd.arg("--verbose").arg(nix_path.to_str().unwrap());
 }
 
-#[cfg(feature = "network-tests")]
+#[cfg_attr(not(feature = "network-tests"), ignore)]
 #[test]
 fn test_fetcher_fetch_from_codeberg() {
     let nix_content = r#"{
@@ -475,6 +483,108 @@ fn test_fetcher_pkgs_dotted_name() {
     cmd.assert()
         .success()
         .stdout(predicates::str::contains("fetchgit.rev"));
+}
+
+fn nix_prefetch_git_is_available() -> bool {
+    Command::new("nix-prefetch-git")
+        .arg("--version")
+        .output()
+        .is_ok_and(|out| out.status.success())
+}
+
+#[test]
+fn test_fetcher_empty_hash_filled_on_version_update() {
+    if !nix_prefetch_git_is_available() {
+        return;
+    }
+
+    let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
+
+    let nix_content = format!(
+        r#"{{
+  src = fetchgit {{
+    url = "{}";
+    rev = "v1.0.0";
+    hash = "";
+  }};
+}}"#,
+        repo.path_str()
+    );
+
+    let nix_dir = tempdir().unwrap();
+    let nix_path = nix_dir.path().join("test.nix");
+    fs::write(&nix_path, &nix_content).unwrap();
+
+    let mut cmd = Command::cargo_bin("nix-update-git").unwrap();
+    cmd.arg(nix_path.to_str().unwrap());
+    cmd.assert()
+        .success()
+        .stdout(predicates::str::contains("fetchgit.hash"))
+        .stdout(predicates::str::contains("fetchgit.rev"));
+}
+
+#[test]
+fn test_fetcher_pinned_empty_hash_attempted() {
+    if !nix_prefetch_git_is_available() {
+        return;
+    }
+
+    let repo = TestRepo::new(&["v1.0.0"]);
+    let sha = repo.head_sha();
+
+    let nix_content = format!(
+        r#"{{
+  src = fetchgit {{ # pin
+    url = "{}";
+    rev = "{}";
+    hash = "";
+  }};
+}}"#,
+        repo.path_str(),
+        sha
+    );
+
+    let nix_dir = tempdir().unwrap();
+    let nix_path = nix_dir.path().join("test.nix");
+    fs::write(&nix_path, &nix_content).unwrap();
+
+    let mut cmd = Command::cargo_bin("nix-update-git").unwrap();
+    cmd.arg(nix_path.to_str().unwrap());
+    let output = cmd.output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "Command should succeed");
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("fetchgit.hash"),
+        "Pinned call with empty hash should attempt to fill it, got stdout: {}, stderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr
+    );
+}
+
+#[test]
+fn test_fetcher_pinned_nonempty_hash_not_updated() {
+    let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
+
+    let nix_content = format!(
+        r#"{{
+  src = fetchgit {{ # pin
+    url = "{}";
+    rev = "v1.0.0";
+    hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  }};
+}}"#,
+        repo.path_str()
+    );
+
+    let nix_dir = tempdir().unwrap();
+    let nix_path = nix_dir.path().join("test.nix");
+    fs::write(&nix_path, &nix_content).unwrap();
+
+    let mut cmd = Command::cargo_bin("nix-update-git").unwrap();
+    cmd.arg("--verbose").arg(nix_path.to_str().unwrap());
+    cmd.assert()
+        .success()
+        .stdout(predicates::str::contains("No updates found"));
 }
 
 #[test]

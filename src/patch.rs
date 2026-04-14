@@ -35,7 +35,6 @@ pub fn apply_updates(content: &str, updates: &[Update], file_path: &Path) -> Str
                 old2,
                 update.replacement,
             );
-            valid_updates.pop();
             continue;
         }
         valid_updates.push(update);

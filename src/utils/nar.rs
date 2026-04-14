@@ -10,7 +10,6 @@ use sha2::{Digest, Sha256};
 pub struct NarHash {
     pub sri: String,
     pub nix32: String,
-    pub hex: String,
 }
 
 pub fn hash_path(path: &Path) -> Result<NarHash> {
@@ -26,12 +25,7 @@ fn digest_to_nar_hash(digest: &[u8]) -> NarHash {
     NarHash {
         sri: format!("sha256-{}", STANDARD.encode(digest)),
         nix32: nix_base32::to_nix_base32(digest),
-        hex: hex_encode(digest),
     }
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 #[cfg(test)]
@@ -51,7 +45,6 @@ mod tests {
 
         assert!(result.sri == "sha256-RTt0byvWGFjqkJXE1t1DjWlJqmE0rq94KOGojukeD6M=");
         assert!(!result.nix32.is_empty());
-        assert_eq!(result.hex.len(), 64);
     }
 
     #[test]
@@ -64,6 +57,5 @@ mod tests {
 
         assert_eq!(h1.sri, h2.sri);
         assert_eq!(h1.nix32, h2.nix32);
-        assert_eq!(h1.hex, h2.hex);
     }
 }

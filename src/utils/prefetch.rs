@@ -85,9 +85,24 @@ impl NixPrefetcher {
 }
 
 fn parse_prefetch_json(json: &str) -> Result<PrefetchResult> {
-    let sha256 = extract_json_string(json, "sha256").unwrap_or_default();
-    let hash = extract_json_string(json, "hash").unwrap_or_default();
-    let rev = extract_json_string(json, "rev").unwrap_or_default();
+    let value: serde_json::Value = serde_json::from_str(json)
+        .with_context(|| "Failed to parse nix-prefetch-git JSON output")?;
+
+    let sha256 = value
+        .get("sha256")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let hash = value
+        .get("hash")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let rev = value
+        .get("rev")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
 
     if sha256.is_empty() && hash.is_empty() {
         anyhow::bail!("nix-prefetch-git output missing sha256 and hash fields");
@@ -100,39 +115,9 @@ fn parse_prefetch_json(json: &str) -> Result<PrefetchResult> {
     })
 }
 
-fn extract_json_string(json: &str, key: &str) -> Option<String> {
-    let pattern = format!("\"{}\"", key);
-    let start = json.find(&pattern)?;
-    let after_key = &json[start + pattern.len()..];
-    let colon_pos = after_key.find(':')?;
-    let value_part = &after_key[colon_pos + 1..];
-    let trimmed = value_part.trim_start();
-    if !trimmed.starts_with('"') {
-        return None;
-    }
-    let value_start = 1;
-    let rest = &trimmed[value_start..];
-    let end = rest.find('"')?;
-    Some(rest[..end].to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_extract_json_string() {
-        let json = r#"{"url": "https://example.com", "rev": "abc123", "sha256": "0abc", "hash": "sha256-xyz"}"#;
-        assert_eq!(extract_json_string(json, "rev"), Some("abc123".to_string()));
-        assert_eq!(
-            extract_json_string(json, "sha256"),
-            Some("0abc".to_string())
-        );
-        assert_eq!(
-            extract_json_string(json, "hash"),
-            Some("sha256-xyz".to_string())
-        );
-    }
 
     #[test]
     fn test_parse_prefetch_json() {
@@ -141,5 +126,26 @@ mod tests {
         assert_eq!(result.sha256_nix, "0abc");
         assert_eq!(result.sri_hash, "sha256-xyz");
         assert_eq!(result.rev, "abc123");
+    }
+
+    #[test]
+    fn test_parse_prefetch_json_with_escaped_quotes() {
+        let json = r#"{"url": "https://example.com/repo", "rev": "abc123", "sha256": "0abc", "hash": "sha256-xyz"}"#;
+        let result = parse_prefetch_json(json).unwrap();
+        assert_eq!(result.sha256_nix, "0abc");
+        assert_eq!(result.sri_hash, "sha256-xyz");
+    }
+
+    #[test]
+    fn test_parse_prefetch_json_missing_fields() {
+        let json = r#"{"url": "https://example.com"}"#;
+        let result = parse_prefetch_json(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_prefetch_json_invalid_json() {
+        let result = parse_prefetch_json("not json");
+        assert!(result.is_err());
     }
 }

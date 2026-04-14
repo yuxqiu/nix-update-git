@@ -7,11 +7,19 @@ input_file: tests/snapshot/data/fetcher/yuxqiu_nix_update_git_fetchgit.nix
   {
     "rule": "fetcher",
     "field": "fetchgit.rev",
-    "old": "\"v0.1.0\""
+    "old": "\"v0.1.0\"",
+    "range": [
+      99,
+      107
+    ]
   },
   {
     "rule": "fetcher",
     "field": "fetchgit.hash",
-    "old": "\"sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\""
+    "old": "\"sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\"",
+    "range": [
+      120,
+      173
+    ]
   }
 ]

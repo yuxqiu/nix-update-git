@@ -1,0 +1,17 @@
+---
+source: tests/snapshot/mod.rs
+expression: output_for_insta
+input_file: tests/snapshot/data/fetcher/arkenfox_user_js_hash_pin.nix
+---
+[
+  {
+    "rule": "fetcher",
+    "field": "fetchFromGitHub.hash",
+    "old": "\"\"",
+    "new": "\"sha256-+DN5bKev9IyefMikOqEWZf/u0flJbLAxwEotGhKSSS4=\"",
+    "range": [
+      115,
+      117
+    ]
+  }
+]

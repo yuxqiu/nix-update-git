@@ -1,0 +1,349 @@
+use std::collections::HashMap;
+
+use anyhow::Result;
+
+use crate::parser::{NixNode, TextRange};
+use crate::rules::traits::{Update, UpdateRule};
+use crate::utils::{GitFetcher, NarHash, VersionDetector};
+
+use kind::{FetcherKind, HashStrategy};
+
+pub mod git_fetch;
+pub mod kind;
+pub mod tarball;
+
+struct FetcherCall {
+    kind: FetcherKind,
+    params: HashMap<String, String>,
+    source_ranges: HashMap<String, TextRange>,
+    pinned: bool,
+    follow_branch: Option<String>,
+}
+
+pub struct FetcherRule;
+
+impl FetcherRule {
+    pub fn new() -> Self {
+        Self
+    }
+
+    fn extract_fetcher_calls(root: &NixNode) -> Vec<FetcherCall> {
+        let mut calls = Vec::new();
+        for node in root.traverse() {
+            if node.kind() != rnix::SyntaxKind::NODE_APPLY {
+                continue;
+            }
+
+            let func_name = match node.apply_function_name() {
+                Some(name) => name,
+                None => continue,
+            };
+
+            let kind = match FetcherKind::from_name(&func_name) {
+                Some(k) => k,
+                None => continue,
+            };
+
+            let arg = match node.apply_argument() {
+                Some(arg) => arg,
+                None => continue,
+            };
+
+            if arg.kind() != rnix::SyntaxKind::NODE_ATTR_SET {
+                continue;
+            }
+
+            let mut params = HashMap::new();
+            let mut source_ranges = HashMap::new();
+
+            for child in arg.children() {
+                if child.kind() != rnix::SyntaxKind::NODE_ATTRPATH_VALUE {
+                    continue;
+                }
+                let segments = child.attrpath_segments();
+                if segments.len() != 1 {
+                    continue;
+                }
+                let key = segments[0].clone();
+
+                if let Some(value) = child.attr_value() {
+                    if value.kind() == rnix::SyntaxKind::NODE_STRING {
+                        if let Some(content) = value.string_content() {
+                            params.insert(key.clone(), content);
+                            source_ranges.insert(key, value.text_range());
+                        }
+                    } else if value.kind() == rnix::SyntaxKind::NODE_IDENT {
+                        let text = value.text();
+                        let trimmed = text.trim();
+                        if trimmed == "true" || trimmed == "false" {
+                            params.insert(key.clone(), trimmed.to_string());
+                        }
+                    }
+                }
+            }
+
+            let pinned = arg.has_pin_comment() || node.has_pin_comment();
+            let follow_branch = arg
+                .follow_branch_comment()
+                .or_else(|| node.follow_branch_comment());
+
+            calls.push(FetcherCall {
+                kind,
+                params,
+                source_ranges,
+                pinned,
+                follow_branch,
+            });
+        }
+        calls
+    }
+
+    fn check_fetcher_call(&self, call: &FetcherCall) -> Result<Option<Vec<Update>>> {
+        let git_url = match call.kind.git_url(&call.params) {
+            Some(url) => url,
+            None => return Ok(None),
+        };
+
+        let mut updates = Vec::new();
+        let mut version_updated_rev: Option<String> = None;
+
+        // Case 1: not pinned -> check version update
+        if !call.pinned {
+            if let Some(branch) = &call.follow_branch {
+                version_updated_rev =
+                    self.handle_branch_following(call, &git_url, branch, &mut updates)?;
+            } else {
+                version_updated_rev = self.handle_version_update(call, &git_url, &mut updates)?;
+            }
+        }
+
+        // Case 2: update hash if needed
+        if call.kind.needs_hash() {
+            if let Some(rev) = &version_updated_rev {
+                Self::try_prefetch_hash(call, rev, &mut updates);
+            } else {
+                Self::try_prefetch_empty_hash(call, &git_url, &mut updates);
+            }
+        }
+
+        if updates.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(updates))
+        }
+    }
+
+    fn handle_branch_following(
+        &self,
+        call: &FetcherCall,
+        git_url: &str,
+        branch: &str,
+        updates: &mut Vec<Update>,
+    ) -> Result<Option<String>> {
+        let new_sha = match GitFetcher::get_latest_commit(git_url, branch)? {
+            Some(sha) => sha,
+            None => {
+                eprintln!(
+                    "Warning: could not find branch '{}' for {}",
+                    branch, git_url
+                );
+                return Ok(None);
+            }
+        };
+
+        let current_ref = call.params.get("rev").or_else(|| call.params.get("ref"));
+
+        if let Some(current) = current_ref
+            && current == &new_sha
+        {
+            return Ok(None);
+        }
+
+        let ref_key = if call.params.contains_key("rev") {
+            "rev"
+        } else if call.kind == FetcherKind::BuiltinsFetchGit {
+            "ref"
+        } else {
+            "rev"
+        };
+
+        if let Some(range) = call.source_ranges.get(ref_key) {
+            updates.push(Update::new(
+                format!("{}.rev", call.kind.name()),
+                format!("\"{}\"", new_sha),
+                *range,
+            ));
+
+            Ok(Some(new_sha))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn handle_version_update(
+        &self,
+        call: &FetcherCall,
+        git_url: &str,
+        updates: &mut Vec<Update>,
+    ) -> Result<Option<String>> {
+        let (version_key, current_version) = if let Some(tag) = call.params.get("tag") {
+            ("tag", tag.clone())
+        } else if let Some(rev) = call.params.get("rev") {
+            if Self::is_commit_hash(rev) {
+                return Ok(None);
+            }
+            if !VersionDetector::is_version(rev) {
+                return Ok(None);
+            }
+            ("rev", rev.clone())
+        } else if let Some(ref_val) = call.params.get("ref") {
+            if call.kind == FetcherKind::BuiltinsFetchGit {
+                if Self::is_commit_hash(ref_val) {
+                    return Ok(None);
+                }
+                if !VersionDetector::is_version(ref_val) {
+                    return Ok(None);
+                }
+                ("ref", ref_val.clone())
+            } else {
+                return Ok(None);
+            }
+        } else {
+            return Ok(None);
+        };
+
+        let latest = match GitFetcher::get_latest_tag_matching(git_url, Some(&current_version))? {
+            Some(tag) => tag,
+            None => return Ok(None),
+        };
+
+        if VersionDetector::compare(&current_version, &latest) != std::cmp::Ordering::Less {
+            return Ok(None);
+        }
+
+        if let Some(range) = call.source_ranges.get(version_key) {
+            updates.push(Update::new(
+                format!("{}.{}", call.kind.name(), version_key),
+                format!("\"{}\"", latest),
+                *range,
+            ));
+
+            let rev_for_prefetch = GitFetcher::resolve_ref_to_sha(git_url, &latest)
+                .ok()
+                .flatten();
+            let prefetch_rev = rev_for_prefetch.as_deref().unwrap_or(&latest);
+            Ok(Some(prefetch_rev.to_string()))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn is_commit_hash(s: &str) -> bool {
+        s.len() == 40 && s.chars().all(|c| c.is_ascii_hexdigit())
+    }
+
+    fn resolve_rev(call: &FetcherCall, git_url: &str) -> Option<String> {
+        let rev = if let Some(tag) = call.params.get("tag") {
+            tag.clone()
+        } else if let Some(rev) = call.params.get("rev") {
+            rev.clone()
+        } else if let Some(ref_val) = call.params.get("ref") {
+            ref_val.clone()
+        } else {
+            return None;
+        };
+
+        if Self::is_commit_hash(&rev) {
+            Some(rev)
+        } else {
+            GitFetcher::resolve_ref_to_sha(git_url, &rev).ok().flatten()
+        }
+    }
+
+    fn try_prefetch_hash(call: &FetcherCall, rev: &str, updates: &mut Vec<Update>) {
+        if !call.source_ranges.contains_key("hash") && !call.source_ranges.contains_key("sha256") {
+            return;
+        }
+
+        let result = Self::compute_hash(call, rev);
+
+        match result {
+            Ok(nar_hash) => {
+                if let Some(range) = call.source_ranges.get("hash") {
+                    updates.push(Update::new(
+                        format!("{}.hash", call.kind.name()),
+                        format!("\"{}\"", nar_hash.sri),
+                        *range,
+                    ));
+                }
+                if let Some(range) = call.source_ranges.get("sha256") {
+                    updates.push(Update::new(
+                        format!("{}.sha256", call.kind.name()),
+                        format!("\"{}\"", nar_hash.nix32),
+                        *range,
+                    ));
+                }
+            }
+            Err(e) => {
+                let git_url = call.kind.git_url(&call.params).unwrap_or_default();
+                eprintln!(
+                    "Warning: could not prefetch hash for {} @ {}: {}",
+                    git_url, rev, e
+                );
+            }
+        }
+    }
+
+    fn try_prefetch_empty_hash(call: &FetcherCall, git_url: &str, updates: &mut Vec<Update>) {
+        let has_empty_hash = call.params.get("hash").is_some_and(|h| h.is_empty())
+            || call.params.get("sha256").is_some_and(|h| h.is_empty());
+
+        if !has_empty_hash {
+            return;
+        }
+
+        if let Some(rev) = Self::resolve_rev(call, git_url) {
+            Self::try_prefetch_hash(call, &rev, updates);
+        }
+    }
+
+    fn compute_hash(call: &FetcherCall, rev: &str) -> Result<NarHash> {
+        match call.kind.hash_strategy(&call.params) {
+            HashStrategy::Tarball => tarball::compute_hash(&call.kind, &call.params, rev),
+            HashStrategy::Git => git_fetch::compute_hash(&call.kind, &call.params, rev),
+            HashStrategy::None => anyhow::bail!("No hash needed for this fetcher"),
+        }
+    }
+}
+
+impl Default for FetcherRule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl UpdateRule for FetcherRule {
+    fn name(&self) -> &str {
+        "fetcher"
+    }
+
+    fn matches(&self, node: &NixNode) -> bool {
+        node.kind() == rnix::SyntaxKind::NODE_ROOT || node.kind() == rnix::SyntaxKind::NODE_ATTR_SET
+    }
+
+    fn check(&self, node: &NixNode) -> Result<Option<Vec<Update>>> {
+        let mut all_updates = Vec::new();
+
+        for call in Self::extract_fetcher_calls(node) {
+            if let Some(updates) = self.check_fetcher_call(&call)? {
+                all_updates.extend(updates);
+            }
+        }
+
+        if all_updates.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(all_updates))
+        }
+    }
+}

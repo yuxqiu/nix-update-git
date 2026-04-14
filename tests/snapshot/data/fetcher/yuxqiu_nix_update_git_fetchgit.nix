@@ -1,3 +1,4 @@
+# redact: new
 {
   src = fetchgit {
     url = "https://github.com/yuxqiu/nix-update-git";

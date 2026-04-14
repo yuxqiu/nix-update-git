@@ -1,0 +1,6 @@
+---
+source: tests/snapshot/mod.rs
+expression: output_for_insta
+input_file: tests/snapshot/data/fetcher/arkenfox_user_js_version_hash_no_update.nix
+---
+[]

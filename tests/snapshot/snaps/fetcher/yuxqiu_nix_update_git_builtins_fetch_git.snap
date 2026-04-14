@@ -7,6 +7,10 @@ input_file: tests/snapshot/data/fetcher/yuxqiu_nix_update_git_builtins_fetch_git
   {
     "rule": "fetcher",
     "field": "builtins.fetchGit.ref",
-    "old": "\"v0.1.0\""
+    "old": "\"v0.1.0\"",
+    "range": [
+      108,
+      116
+    ]
   }
 ]

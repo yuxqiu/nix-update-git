@@ -1,3 +1,4 @@
+# redact: new
 {
   src = fetchFromGitHub {
     owner = "yuxqiu";
