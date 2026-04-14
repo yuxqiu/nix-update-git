@@ -409,7 +409,7 @@ impl UpdateRule for FlakeInputRule {
     }
 
     fn matches(&self, node: &NixNode) -> bool {
-        node.kind() == rnix::SyntaxKind::NODE_ROOT || node.kind() == rnix::SyntaxKind::NODE_ATTR_SET
+        node.kind() == rnix::SyntaxKind::NODE_ROOT
     }
 
     fn check(&self, node: &NixNode) -> Result<Option<Vec<Update>>> {

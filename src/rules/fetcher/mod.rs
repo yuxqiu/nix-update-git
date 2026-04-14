@@ -28,86 +28,66 @@ impl FetcherRule {
         Self
     }
 
-    fn extract_fetcher_calls(root: &NixNode) -> Vec<FetcherCall> {
-        let mut calls = Vec::new();
-        for node in root.traverse() {
-            if node.kind() != rnix::SyntaxKind::NODE_APPLY {
+    fn try_extract_call(node: &NixNode) -> Option<FetcherCall> {
+        let func_name = node.apply_function_name()?;
+        let kind = FetcherKind::from_name(&func_name)?;
+        let arg = node.apply_argument()?;
+
+        if arg.kind() != rnix::SyntaxKind::NODE_ATTR_SET {
+            return None;
+        }
+
+        let mut params = HashMap::new();
+        let mut source_ranges = HashMap::new();
+        let mut sparse_checkout = Vec::new();
+
+        for child in arg.children() {
+            if child.kind() != rnix::SyntaxKind::NODE_ATTRPATH_VALUE {
                 continue;
             }
-
-            let func_name = match node.apply_function_name() {
-                Some(name) => name,
-                None => continue,
-            };
-
-            let kind = match FetcherKind::from_name(&func_name) {
-                Some(k) => k,
-                None => continue,
-            };
-
-            let arg = match node.apply_argument() {
-                Some(arg) => arg,
-                None => continue,
-            };
-
-            if arg.kind() != rnix::SyntaxKind::NODE_ATTR_SET {
+            let segments = child.attrpath_segments();
+            if segments.len() != 1 {
                 continue;
             }
+            let key = segments[0].clone();
 
-            let mut params = HashMap::new();
-            let mut source_ranges = HashMap::new();
-            let mut sparse_checkout = Vec::new();
-
-            for child in arg.children() {
-                if child.kind() != rnix::SyntaxKind::NODE_ATTRPATH_VALUE {
-                    continue;
-                }
-                let segments = child.attrpath_segments();
-                if segments.len() != 1 {
-                    continue;
-                }
-                let key = segments[0].clone();
-
-                if let Some(value) = child.attr_value() {
-                    if value.kind() == rnix::SyntaxKind::NODE_STRING {
-                        if let Some(content) = value.string_content() {
-                            params.insert(key.clone(), content);
-                            source_ranges.insert(key, value.text_range());
-                        }
-                    } else if value.kind() == rnix::SyntaxKind::NODE_IDENT {
-                        let text = value.text();
-                        let trimmed = text.trim();
-                        if trimmed == "true" || trimmed == "false" {
-                            params.insert(key.clone(), trimmed.to_string());
-                        }
-                    } else if key == "sparseCheckout" && value.kind() == rnix::SyntaxKind::NODE_LIST
-                    {
-                        for item in value.children() {
-                            if item.kind() == rnix::SyntaxKind::NODE_STRING
-                                && let Some(content) = item.string_content()
-                            {
-                                sparse_checkout.push(content);
-                            }
+            if let Some(value) = child.attr_value() {
+                if value.kind() == rnix::SyntaxKind::NODE_STRING {
+                    if let Some(content) = value.string_content() {
+                        params.insert(key.clone(), content);
+                        source_ranges.insert(key, value.text_range());
+                    }
+                } else if value.kind() == rnix::SyntaxKind::NODE_IDENT {
+                    let text = value.text();
+                    let trimmed = text.trim();
+                    if trimmed == "true" || trimmed == "false" {
+                        params.insert(key.clone(), trimmed.to_string());
+                    }
+                } else if key == "sparseCheckout" && value.kind() == rnix::SyntaxKind::NODE_LIST {
+                    for item in value.children() {
+                        if item.kind() == rnix::SyntaxKind::NODE_STRING
+                            && let Some(content) = item.string_content()
+                        {
+                            sparse_checkout.push(content);
                         }
                     }
                 }
             }
-
-            let pinned = arg.has_pin_comment() || node.has_pin_comment();
-            let follow_branch = arg
-                .follow_branch_comment()
-                .or_else(|| node.follow_branch_comment());
-
-            calls.push(FetcherCall {
-                kind,
-                params,
-                source_ranges,
-                pinned,
-                follow_branch,
-                sparse_checkout,
-            });
         }
-        calls
+
+        let pinned = arg.has_pin_comment() || node.has_pin_comment();
+        let follow_branch = arg
+            .follow_branch_comment()
+            .or_else(|| node.follow_branch_comment());
+
+        Some(FetcherCall {
+            kind,
+            params,
+            source_ranges,
+            pinned,
+            follow_branch,
+            sparse_checkout,
+        })
     }
 
     fn check_fetcher_call(&self, call: &FetcherCall) -> Result<Option<Vec<Update>>> {
@@ -343,22 +323,14 @@ impl UpdateRule for FetcherRule {
     }
 
     fn matches(&self, node: &NixNode) -> bool {
-        node.kind() == rnix::SyntaxKind::NODE_ROOT || node.kind() == rnix::SyntaxKind::NODE_ATTR_SET
+        node.kind() == rnix::SyntaxKind::NODE_APPLY
     }
 
     fn check(&self, node: &NixNode) -> Result<Option<Vec<Update>>> {
-        let mut all_updates = Vec::new();
-
-        for call in Self::extract_fetcher_calls(node) {
-            if let Some(updates) = self.check_fetcher_call(&call)? {
-                all_updates.extend(updates);
-            }
-        }
-
-        if all_updates.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(all_updates))
-        }
+        let call = match Self::try_extract_call(node) {
+            Some(call) => call,
+            None => return Ok(None),
+        };
+        self.check_fetcher_call(&call)
     }
 }

@@ -39,18 +39,20 @@ impl RuleRegistry {
         self.rules.push(Box::new(rule));
     }
 
-    pub fn check_all(&self, node: &NixNode) -> Result<Vec<(String, Vec<Update>)>> {
+    pub fn check_all(&self, root: &NixNode) -> Result<Vec<(String, Vec<Update>)>> {
         let mut results = Vec::new();
-        for rule in &self.rules {
-            if rule.matches(node)
-                && let Some(mut updates) = rule.check(node)?
-                && !updates.is_empty()
-            {
-                let rule_name = rule.name().to_string();
-                for update in &mut updates {
-                    update.rule_name = rule_name.clone();
+        for node in root.traverse() {
+            for rule in &self.rules {
+                if rule.matches(&node)
+                    && let Some(mut updates) = rule.check(&node)?
+                    && !updates.is_empty()
+                {
+                    let rule_name = rule.name().to_string();
+                    for update in &mut updates {
+                        update.rule_name = rule_name.clone();
+                    }
+                    results.push((rule_name, updates));
                 }
-                results.push((rule_name, updates));
             }
         }
         Ok(results)

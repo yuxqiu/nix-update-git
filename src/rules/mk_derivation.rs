@@ -38,135 +38,99 @@ impl MkDerivationRule {
         Self
     }
 
-    fn extract_mk_derivation_calls(root: &NixNode) -> Vec<MkDerivationCall> {
-        let mut calls = Vec::new();
-        for node in root.traverse() {
-            if node.kind() != rnix::SyntaxKind::NODE_APPLY {
+    fn try_extract_call(node: &NixNode) -> Option<MkDerivationCall> {
+        let func_name = node.apply_function_name()?;
+        let short_name = func_name.rsplit('.').next().unwrap_or(&func_name);
+        if short_name != "mkDerivation" {
+            return None;
+        }
+
+        let arg = node.apply_argument()?;
+        if arg.kind() != rnix::SyntaxKind::NODE_ATTR_SET {
+            return None;
+        }
+
+        let version_entry = arg.find_attr_by_key("version")?;
+        let version_node = version_entry.attr_value()?;
+        if version_node.kind() != rnix::SyntaxKind::NODE_STRING {
+            return None;
+        }
+        let version_content = version_node.string_content()?;
+        if !VersionDetector::is_version(&version_content) {
+            return None;
+        }
+
+        let src_entry = arg.find_attr_by_key("src")?;
+        let src_value = src_entry.attr_value()?;
+        if src_value.kind() != rnix::SyntaxKind::NODE_APPLY {
+            return None;
+        }
+
+        let src_func_name = src_value.apply_function_name()?;
+        let fetcher_kind = FetcherKind::from_name(&src_func_name)?;
+
+        let src_arg = src_value.apply_argument()?;
+        if src_arg.kind() != rnix::SyntaxKind::NODE_ATTR_SET {
+            return None;
+        }
+
+        let mut params = HashMap::new();
+        let mut source_ranges = HashMap::new();
+        let mut sparse_checkout = Vec::new();
+
+        for child in src_arg.children() {
+            if child.kind() != rnix::SyntaxKind::NODE_ATTRPATH_VALUE {
                 continue;
             }
-
-            let func_name = match node.apply_function_name() {
-                Some(name) => name,
-                None => continue,
-            };
-            let short_name = func_name.rsplit('.').next().unwrap_or(&func_name);
-            if short_name != "mkDerivation" {
+            let segments = child.attrpath_segments();
+            if segments.len() != 1 {
                 continue;
             }
+            let key = segments[0].clone();
 
-            let arg = match node.apply_argument() {
-                Some(arg) => arg,
-                None => continue,
-            };
-            if arg.kind() != rnix::SyntaxKind::NODE_ATTR_SET {
-                continue;
-            }
-
-            let version_entry = match arg.find_attr_by_key("version") {
-                Some(e) => e,
-                None => continue,
-            };
-            let version_node = match version_entry.attr_value() {
-                Some(v) if v.kind() == rnix::SyntaxKind::NODE_STRING => v,
-                _ => continue,
-            };
-            let version_content = match version_node.string_content() {
-                Some(c) => c,
-                None => continue,
-            };
-            if !VersionDetector::is_version(&version_content) {
-                continue;
-            }
-
-            let src_entry = match arg.find_attr_by_key("src") {
-                Some(e) => e,
-                None => continue,
-            };
-            let src_value = match src_entry.attr_value() {
-                Some(v) => v,
-                None => continue,
-            };
-            if src_value.kind() != rnix::SyntaxKind::NODE_APPLY {
-                continue;
-            }
-
-            let src_func_name = match src_value.apply_function_name() {
-                Some(name) => name,
-                None => continue,
-            };
-            let fetcher_kind = match FetcherKind::from_name(&src_func_name) {
-                Some(k) => k,
-                None => continue,
-            };
-
-            let src_arg = match src_value.apply_argument() {
-                Some(a) if a.kind() == rnix::SyntaxKind::NODE_ATTR_SET => a,
-                _ => continue,
-            };
-
-            let mut params = HashMap::new();
-            let mut source_ranges = HashMap::new();
-            let mut sparse_checkout = Vec::new();
-
-            for child in src_arg.children() {
-                if child.kind() != rnix::SyntaxKind::NODE_ATTRPATH_VALUE {
-                    continue;
-                }
-                let segments = child.attrpath_segments();
-                if segments.len() != 1 {
-                    continue;
-                }
-                let key = segments[0].clone();
-
-                if let Some(value) = child.attr_value() {
-                    if value.kind() == rnix::SyntaxKind::NODE_STRING {
-                        if let Some(content) = value.string_content() {
-                            params.insert(key.clone(), content);
-                            source_ranges.insert(key, value.text_range());
-                        }
-                    } else if value.kind() == rnix::SyntaxKind::NODE_IDENT {
-                        let text = value.text();
-                        let trimmed = text.trim();
-                        if trimmed == "true" || trimmed == "false" {
-                            params.insert(key.clone(), trimmed.to_string());
-                        }
-                    } else if key == "sparseCheckout" && value.kind() == rnix::SyntaxKind::NODE_LIST
-                    {
-                        for item in value.children() {
-                            if item.kind() == rnix::SyntaxKind::NODE_STRING
-                                && let Some(content) = item.string_content()
-                            {
-                                sparse_checkout.push(content);
-                            }
+            if let Some(value) = child.attr_value() {
+                if value.kind() == rnix::SyntaxKind::NODE_STRING {
+                    if let Some(content) = value.string_content() {
+                        params.insert(key.clone(), content);
+                        source_ranges.insert(key, value.text_range());
+                    }
+                } else if value.kind() == rnix::SyntaxKind::NODE_IDENT {
+                    let text = value.text();
+                    let trimmed = text.trim();
+                    if trimmed == "true" || trimmed == "false" {
+                        params.insert(key.clone(), trimmed.to_string());
+                    }
+                } else if key == "sparseCheckout" && value.kind() == rnix::SyntaxKind::NODE_LIST {
+                    for item in value.children() {
+                        if item.kind() == rnix::SyntaxKind::NODE_STRING
+                            && let Some(content) = item.string_content()
+                        {
+                            sparse_checkout.push(content);
                         }
                     }
                 }
             }
-
-            let rev = match params.get("rev") {
-                Some(r) => r,
-                None => continue,
-            };
-            if !is_commit_hash(rev) {
-                continue;
-            }
-
-            let pinned = arg.has_pin_comment()
-                || node.has_pin_comment()
-                || src_arg.has_pin_comment()
-                || src_value.has_pin_comment();
-
-            calls.push(MkDerivationCall {
-                version_value: version_content,
-                version_range: version_node.text_range(),
-                fetcher_kind,
-                fetcher_params: params,
-                fetcher_source_ranges: source_ranges,
-                fetcher_sparse_checkout: sparse_checkout,
-                pinned,
-            });
         }
-        calls
+
+        let rev = params.get("rev")?;
+        if !is_commit_hash(rev) {
+            return None;
+        }
+
+        let pinned = arg.has_pin_comment()
+            || node.has_pin_comment()
+            || src_arg.has_pin_comment()
+            || src_value.has_pin_comment();
+
+        Some(MkDerivationCall {
+            version_value: version_content,
+            version_range: version_node.text_range(),
+            fetcher_kind,
+            fetcher_params: params,
+            fetcher_source_ranges: source_ranges,
+            fetcher_sparse_checkout: sparse_checkout,
+            pinned,
+        })
     }
 
     fn compute_hash(
@@ -280,23 +244,15 @@ impl UpdateRule for MkDerivationRule {
     }
 
     fn matches(&self, node: &NixNode) -> bool {
-        node.kind() == rnix::SyntaxKind::NODE_ROOT || node.kind() == rnix::SyntaxKind::NODE_ATTR_SET
+        node.kind() == rnix::SyntaxKind::NODE_APPLY
     }
 
     fn check(&self, node: &NixNode) -> Result<Option<Vec<Update>>> {
-        let mut all_updates = Vec::new();
-
-        for call in Self::extract_mk_derivation_calls(node) {
-            if let Some(updates) = Self::check_mk_derivation_call(&call)? {
-                all_updates.extend(updates);
-            }
-        }
-
-        if all_updates.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(all_updates))
-        }
+        let call = match Self::try_extract_call(node) {
+            Some(call) => call,
+            None => return Ok(None),
+        };
+        Self::check_mk_derivation_call(&call)
     }
 }
 
