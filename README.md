@@ -8,6 +8,7 @@ Update git references in Nix flake files and Nix expressions.
 
 - **Flake inputs**: update `ref` values and inline `?ref=` in URL strings
 - **Fetcher calls**: update `rev`, `tag`, and `ref` in `fetchgit`, `fetchFromGitHub`, `fetchFromGitLab`, `fetchFromGitea`, `fetchFromForgejo`, `fetchFromCodeberg`, `fetchFromSourcehut`, `fetchFromBitbucket`, `fetchFromSavannah`, `fetchFromRepoOrCz`, `fetchFromGitiles`, and `builtins.fetchGit`
+- **mkDerivation**: update `version` and corresponding `rev`/`hash` in `stdenv.mkDerivation rec { version = "..."; src = fetchX { rev = "<commit-hash>"; ... }; }` patterns
 - **Branch following**: use `# follow:<branch>` comments to track a branch's latest commit instead of version tags
 - **Pinning**: `# pin` comments on any input or fetcher call skips it entirely
 - **Multiple modes**: check (default), update, and interactive
@@ -130,6 +131,24 @@ src = pkgs.fetchFromGitHub {
 ```
 
 All standard nixpkgs fetchers are supported (`fetchgit`, `fetchFromGitHub`, `fetchFromGitLab`, `fetchFromGitea`, `fetchFromForgejo`, `fetchFromCodeberg`, `fetchFromSourcehut`, `fetchFromBitbucket`, `fetchFromGitiles`, `fetchFromSavannah`, `fetchFromRepoOrCz`, `builtins.fetchGit`).
+
+### mkDerivation
+
+Update `version`, `rev`, and `hash`/`sha256` together when `version` is a version string and `rev` is a 40-character commit hash:
+
+```nix
+stdenv.mkDerivation rec {
+  name = "foo-${version}";
+  version = "1.0.0";
+  src = fetchgit {
+    url = "https://github.com/owner/repo";
+    rev = "e67cc2e189679f991690ade03d0ee88566d2eb0f";
+    sha256 = "0nmyp5yrzl9dbq85wyiimsj9fklb8637a1936nw7zzvlnzkgh28n";
+  };
+};
+```
+
+When the `# pin` comment is present on the `mkDerivation` call, the entire block is skipped.
 
 ### Branch following
 
