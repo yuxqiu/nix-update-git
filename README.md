@@ -8,7 +8,7 @@ Update git references in Nix flake files and Nix expressions.
 
 - **Flake inputs**: update `ref` values and inline `?ref=` in URL strings
 - **Fetcher calls**: update `rev`, `tag`, and `ref` in `fetchgit`, `fetchFromGitHub`, `fetchFromGitLab`, `fetchFromGitea`, `fetchFromForgejo`, `fetchFromCodeberg`, `fetchFromSourcehut`, `fetchFromBitbucket`, `fetchFromSavannah`, `fetchFromRepoOrCz`, `fetchFromGitiles`, and `builtins.fetchGit`
-- **mkDerivation**: update `version` and corresponding `rev`/`hash` in `stdenv.mkDerivation rec { version = "..."; src = fetchX { rev = "<commit-hash>"; ... }; }` patterns
+- **mkDerivation**: update `version` and corresponding source ref (`tag`/`rev`/`ref`) and hash in `stdenv.mkDerivation rec { ... }` patterns
 - **Branch following**: use `# follow:<branch>` comments to track a branch's latest commit instead of version tags
 - **Pinning**: `# pin` comments on any input or fetcher call skips it entirely
 - **Multiple modes**: check (default), update, and interactive
@@ -134,7 +134,13 @@ All standard nixpkgs fetchers are supported (`fetchgit`, `fetchFromGitHub`, `fet
 
 ### mkDerivation
 
-Update `version`, `rev`, and `hash`/`sha256` together when `version` is a version string and `rev` is a 40-character commit hash:
+`mkDerivation` updates `version` together with the source ref in `src` (priority: `tag` > `rev` > `ref`) and refreshes `hash`/`sha256` when needed.
+
+Supported source-ref behaviors:
+- Pure version ref equal to `version` (for example `rev = "v1.0.0"`) updates both together.
+- Pure commit-hash ref uses `version` to find newer upstream tags, then updates `version` and the ref.
+- Empty source ref can be populated from `version`.
+- Interpolated source refs that depend on `${version}` (in `rec` attrsets) update `version`; the interpolated ref text stays as-is.
 
 ```nix
 stdenv.mkDerivation rec {

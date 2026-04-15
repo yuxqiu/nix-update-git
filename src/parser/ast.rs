@@ -216,6 +216,39 @@ impl NixNode {
         Some(result)
     }
 
+    pub fn interpolated_single_var_affixes(&self, var_name: &str) -> Option<(String, String)> {
+        if self.kind() != rnix::SyntaxKind::NODE_STRING {
+            return None;
+        }
+        let nix_str = rnix::ast::Str::cast(self.node.clone())?;
+        let parts = nix_str.normalized_parts();
+        let mut seen_var = false;
+        let mut prefix = String::new();
+        let mut suffix = String::new();
+        for part in parts {
+            match part {
+                rnix::ast::InterpolPart::Literal(lit) => {
+                    if seen_var {
+                        suffix.push_str(&lit);
+                    } else {
+                        prefix.push_str(&lit);
+                    }
+                }
+                rnix::ast::InterpolPart::Interpolation(interpol) => {
+                    let expr_text = interpol.expr()?.syntax().text().to_string();
+                    if expr_text.trim() != var_name || seen_var {
+                        return None;
+                    }
+                    seen_var = true;
+                }
+            }
+        }
+        if !seen_var {
+            return None;
+        }
+        Some((prefix, suffix))
+    }
+
     pub fn find_attr_by_key(&self, key: &str) -> Option<NixNode> {
         if self.kind() != rnix::SyntaxKind::NODE_ATTR_SET {
             return None;

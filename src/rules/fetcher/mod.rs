@@ -12,6 +12,60 @@ pub mod git_fetch;
 pub mod kind;
 pub mod tarball;
 
+pub(crate) fn is_commit_hash(s: &str) -> bool {
+    s.len() == 40 && s.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+pub(crate) fn version_ref_key_and_value(
+    kind: FetcherKind,
+    params: &HashMap<String, String>,
+) -> Option<(&'static str, String)> {
+    if let Some(tag) = params.get("tag") {
+        return Some(("tag", tag.clone()));
+    }
+    if let Some(rev) = params.get("rev") {
+        if is_commit_hash(rev) || !VersionDetector::is_version(rev) {
+            return None;
+        }
+        return Some(("rev", rev.clone()));
+    }
+    if let Some(ref_val) = params.get("ref")
+        && kind == FetcherKind::BuiltinsFetchGit
+    {
+        if is_commit_hash(ref_val) || !VersionDetector::is_version(ref_val) {
+            return None;
+        }
+        return Some(("ref", ref_val.clone()));
+    }
+    None
+}
+
+pub(crate) fn preferred_ref_key(params: &HashMap<String, String>) -> Option<&'static str> {
+    if params.contains_key("tag") {
+        Some("tag")
+    } else if params.contains_key("rev") {
+        Some("rev")
+    } else if params.contains_key("ref") {
+        Some("ref")
+    } else {
+        None
+    }
+}
+
+pub(crate) fn resolve_ref_for_prefetch(git_url: &str, ref_value: &str) -> Option<String> {
+    if ref_value.is_empty() {
+        return None;
+    }
+    if is_commit_hash(ref_value) {
+        Some(ref_value.to_string())
+    } else {
+        GitFetcher::resolve_ref_to_sha(git_url, ref_value)
+            .ok()
+            .flatten()
+            .or_else(|| Some(ref_value.to_string()))
+    }
+}
+
 struct FetcherCall {
     kind: FetcherKind,
     params: HashMap<String, String>,
@@ -178,29 +232,9 @@ impl FetcherRule {
         git_url: &str,
         updates: &mut Vec<Update>,
     ) -> Result<Option<String>> {
-        let (version_key, current_version) = if let Some(tag) = call.params.get("tag") {
-            ("tag", tag.clone())
-        } else if let Some(rev) = call.params.get("rev") {
-            if Self::is_commit_hash(rev) {
-                return Ok(None);
-            }
-            if !VersionDetector::is_version(rev) {
-                return Ok(None);
-            }
-            ("rev", rev.clone())
-        } else if let Some(ref_val) = call.params.get("ref") {
-            if call.kind == FetcherKind::BuiltinsFetchGit {
-                if Self::is_commit_hash(ref_val) {
-                    return Ok(None);
-                }
-                if !VersionDetector::is_version(ref_val) {
-                    return Ok(None);
-                }
-                ("ref", ref_val.clone())
-            } else {
-                return Ok(None);
-            }
-        } else {
+        let Some((version_key, current_version)) =
+            version_ref_key_and_value(call.kind, &call.params)
+        else {
             return Ok(None);
         };
 
@@ -230,26 +264,10 @@ impl FetcherRule {
         }
     }
 
-    fn is_commit_hash(s: &str) -> bool {
-        s.len() == 40 && s.chars().all(|c| c.is_ascii_hexdigit())
-    }
-
     fn resolve_rev(call: &FetcherCall, git_url: &str) -> Option<String> {
-        let rev = if let Some(tag) = call.params.get("tag") {
-            tag.clone()
-        } else if let Some(rev) = call.params.get("rev") {
-            rev.clone()
-        } else if let Some(ref_val) = call.params.get("ref") {
-            ref_val.clone()
-        } else {
-            return None;
-        };
-
-        if Self::is_commit_hash(&rev) {
-            Some(rev)
-        } else {
-            GitFetcher::resolve_ref_to_sha(git_url, &rev).ok().flatten()
-        }
+        let key = preferred_ref_key(&call.params)?;
+        let ref_value = call.params.get(key)?;
+        resolve_ref_for_prefetch(git_url, ref_value)
     }
 
     fn try_prefetch_hash(call: &FetcherCall, rev: &str, updates: &mut Vec<Update>) {
