@@ -55,7 +55,7 @@ impl MkDerivationRule {
         if version_node.kind() != rnix::SyntaxKind::NODE_STRING {
             return None;
         }
-        let version_content = version_node.string_content()?;
+        let version_content = version_node.pure_string_content()?;
         if !VersionDetector::is_version(&version_content) {
             return None;
         }
@@ -90,7 +90,7 @@ impl MkDerivationRule {
 
             if let Some(value) = child.attr_value() {
                 if value.kind() == rnix::SyntaxKind::NODE_STRING {
-                    if let Some(content) = value.string_content() {
+                    if let Some(content) = value.pure_string_content() {
                         params.insert(key.clone(), content);
                         source_ranges.insert(key, value.text_range());
                     }
@@ -103,7 +103,7 @@ impl MkDerivationRule {
                 } else if key == "sparseCheckout" && value.kind() == rnix::SyntaxKind::NODE_LIST {
                     for item in value.children() {
                         if item.kind() == rnix::SyntaxKind::NODE_STRING
-                            && let Some(content) = item.string_content()
+                            && let Some(content) = item.pure_string_content()
                         {
                             sparse_checkout.push(content);
                         }

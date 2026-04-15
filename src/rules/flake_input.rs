@@ -223,7 +223,7 @@ impl FlakeInputRule {
                                 });
                         } else if value.kind() == rnix::SyntaxKind::NODE_STRING {
                             let range = value.text_range();
-                            let url_content = value.string_content();
+                            let url_content = value.pure_string_content();
                             let pinned = node.has_pin_comment();
                             if let Some(content) = url_content {
                                 inputs
@@ -251,7 +251,7 @@ impl FlakeInputRule {
                         && value_node.kind() == rnix::SyntaxKind::NODE_STRING
                     {
                         let range = value_node.text_range();
-                        if let Some(content) = value_node.string_content() {
+                        if let Some(content) = value_node.pure_string_content() {
                             let sv = SourceValue {
                                 value: content,
                                 range,
@@ -331,7 +331,7 @@ impl FlakeInputRule {
                             });
                     } else if value.kind() == rnix::SyntaxKind::NODE_STRING {
                         let range = value.text_range();
-                        let url_content = value.string_content();
+                        let url_content = value.pure_string_content();
                         let pinned = entry.has_pin_comment();
                         if let Some(content) = url_content {
                             inputs
@@ -357,7 +357,7 @@ impl FlakeInputRule {
                     && value_node.kind() == rnix::SyntaxKind::NODE_STRING
                 {
                     let range = value_node.text_range();
-                    if let Some(content) = value_node.string_content() {
+                    if let Some(content) = value_node.pure_string_content() {
                         let sv = SourceValue {
                             value: content,
                             range,
@@ -388,7 +388,7 @@ impl FlakeInputRule {
 
     fn extract_source_string(attr_set: &NixNode, key: &str) -> Option<SourceValue> {
         let node = attr_set.find_string_node(key)?;
-        let content = node.string_content()?;
+        let content = node.pure_string_content()?;
         let range = node.text_range();
         Some(SourceValue {
             value: content,

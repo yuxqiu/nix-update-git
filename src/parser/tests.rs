@@ -13,17 +13,17 @@ fn find_attr_set(root: &NixNode) -> Option<NixNode> {
 }
 
 #[test]
-fn test_string_content_double_quoted() {
-    let content = "{ foo = \"hello world\"; }";
+fn test_pure_string_content_double_quoted() {
+    let content = r#"{ foo = "hello world"; }"#;
     let root = parse(content);
     let attr_set = find_attr_set(&root).unwrap();
     let node = attr_set.find_attr_by_key("foo").unwrap();
     let value = node.attr_value().unwrap();
-    assert_eq!(value.string_content(), Some("hello world".to_string()));
+    assert_eq!(value.pure_string_content(), Some("hello world".to_string()));
 }
 
 #[test]
-fn test_string_content_indented() {
+fn test_pure_string_content_indented() {
     let content = "foo = ''\n  hello\n  world\n'';\n";
     let full_content = format!("{{ {} }}", content);
     let root = parse(&full_content);
@@ -31,42 +31,89 @@ fn test_string_content_indented() {
     let node = attr_set.find_attr_by_key("foo").unwrap();
     let value = node.attr_value().unwrap();
     assert_eq!(
-        value.string_content(),
-        Some("\n  hello\n  world\n".to_string())
+        value.pure_string_content(),
+        Some("hello\nworld\n".to_string())
     );
 }
 
 #[test]
-fn test_string_content_empty() {
+fn test_pure_string_content_empty() {
     let content = r#"{ foo = ""; }"#;
     let root = parse(content);
     let attr_set = find_attr_set(&root).unwrap();
     let node = attr_set.find_attr_by_key("foo").unwrap();
     let value = node.attr_value().unwrap();
-    assert_eq!(value.string_content(), Some("".to_string()));
+    assert_eq!(value.pure_string_content(), Some("".to_string()));
 }
 
 #[test]
-fn test_string_content_escape_sequences() {
+fn test_pure_string_content_escape_sequences() {
     let content = r#"{ foo = "line1\nline2\ttab"; }"#;
     let root = parse(content);
     let attr_set = find_attr_set(&root).unwrap();
     let node = attr_set.find_attr_by_key("foo").unwrap();
     let value = node.attr_value().unwrap();
     assert_eq!(
-        value.string_content(),
-        Some("line1\\nline2\\ttab".to_string())
+        value.pure_string_content(),
+        Some("line1\nline2\ttab".to_string())
     );
 }
 
 #[test]
-fn test_string_content_non_string() {
+fn test_pure_string_content_non_string() {
     let content = "{ foo = 123; }";
     let root = parse(content);
     let attr_set = find_attr_set(&root).unwrap();
     let node = attr_set.find_attr_by_key("foo").unwrap();
     let value = node.attr_value().unwrap();
-    assert_eq!(value.string_content(), None);
+    assert_eq!(value.pure_string_content(), None);
+}
+
+#[test]
+fn test_pure_string_content_interpolated_returns_none() {
+    let content = r#"{ foo = "hello ${name}"; }"#;
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    let node = attr_set.find_attr_by_key("foo").unwrap();
+    let value = node.attr_value().unwrap();
+    assert_eq!(value.pure_string_content(), None);
+}
+
+#[test]
+fn test_interpolated_string_content_with_vars() {
+    let content = r#"{ name = "world"; foo = "hello ${name}"; }"#;
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    let node = attr_set.find_attr_by_key("foo").unwrap();
+    let value = node.attr_value().unwrap();
+    let mut vars = std::collections::HashMap::new();
+    vars.insert("name".to_string(), "world".to_string());
+    assert_eq!(
+        value.interpolated_string_content(&vars),
+        Some("hello world".to_string())
+    );
+}
+
+#[test]
+fn test_interpolated_string_content_missing_var_returns_none() {
+    let content = r#"{ foo = "hello ${name}"; }"#;
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    let node = attr_set.find_attr_by_key("foo").unwrap();
+    let value = node.attr_value().unwrap();
+    let vars = std::collections::HashMap::new();
+    assert_eq!(value.interpolated_string_content(&vars), None);
+}
+
+#[test]
+fn test_interpolated_string_content_non_string_returns_none() {
+    let content = "{ foo = 123; }";
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    let node = attr_set.find_attr_by_key("foo").unwrap();
+    let value = node.attr_value().unwrap();
+    let vars = std::collections::HashMap::new();
+    assert_eq!(value.interpolated_string_content(&vars), None);
 }
 
 #[test]

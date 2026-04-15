@@ -1,4 +1,5 @@
 use rowan::ast::AstNode;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -178,18 +179,41 @@ impl NixNode {
         None
     }
 
-    pub fn string_content(&self) -> Option<String> {
+    pub fn pure_string_content(&self) -> Option<String> {
         if self.kind() != rnix::SyntaxKind::NODE_STRING {
             return None;
         }
-        let text = self.text();
-        if text.starts_with("''") && text.ends_with("''") && text.len() >= 4 {
-            Some(text[2..text.len() - 2].to_string())
-        } else if text.starts_with('"') && text.ends_with('"') && text.len() >= 2 {
-            Some(text[1..text.len() - 1].to_string())
-        } else {
-            None
+        let nix_str = rnix::ast::Str::cast(self.node.clone())?;
+        let parts = nix_str.normalized_parts();
+        let mut result = String::new();
+        for part in parts {
+            match part {
+                rnix::ast::InterpolPart::Literal(lit) => result.push_str(&lit),
+                rnix::ast::InterpolPart::Interpolation(_) => return None,
+            }
         }
+        Some(result)
+    }
+
+    pub fn interpolated_string_content(&self, vars: &HashMap<String, String>) -> Option<String> {
+        if self.kind() != rnix::SyntaxKind::NODE_STRING {
+            return None;
+        }
+        let nix_str = rnix::ast::Str::cast(self.node.clone())?;
+        let parts = nix_str.normalized_parts();
+        let mut result = String::new();
+        for part in parts {
+            match part {
+                rnix::ast::InterpolPart::Literal(lit) => result.push_str(&lit),
+                rnix::ast::InterpolPart::Interpolation(interpol) => {
+                    let expr_text = interpol.expr()?.syntax().text().to_string();
+                    let expr_trimmed = expr_text.trim();
+                    let value = vars.get(expr_trimmed)?;
+                    result.push_str(value);
+                }
+            }
+        }
+        Some(result)
     }
 
     pub fn find_attr_by_key(&self, key: &str) -> Option<NixNode> {
@@ -210,7 +234,7 @@ impl NixNode {
     pub fn find_string_value(&self, key: &str) -> Option<String> {
         let entry = self.find_attr_by_key(key)?;
         let value = entry.attr_value()?;
-        value.string_content()
+        value.pure_string_content()
     }
 
     pub fn parent(&self) -> Option<NixNode> {
