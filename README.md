@@ -45,7 +45,7 @@ Options:
   -u, --update           Perform updates
   -i, --interactive      Confirm each update
   -v, --verbose          Enable verbose output
-      --format <FORMAT>  Output format: text or json [default: text]
+      --format <FORMAT>  Output format [default: text] [possible values: text, json]
   -j, --jobs <N>         Number of parallel file processing jobs [default: 4]
   -h, --help             Print help
   -V, --version          Print version
@@ -137,6 +137,7 @@ All standard nixpkgs fetchers are supported (`fetchgit`, `fetchFromGitHub`, `fet
 `mkDerivation` updates `version` together with the source ref in `src` (priority: `tag` > `rev` > `ref`) and refreshes `hash`/`sha256` when needed.
 
 Supported source-ref behaviors:
+
 - Pure version ref equal to `version` (for example `rev = "v1.0.0"`) updates both together.
 - Pure commit-hash ref uses `version` to find newer upstream tags, then updates `version` and the ref.
 - Empty source ref can be populated from `version`.

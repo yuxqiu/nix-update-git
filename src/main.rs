@@ -24,20 +24,16 @@ fn expand_inputs(inputs: Vec<PathBuf>) -> Vec<PathBuf> {
             if input.extension().is_some_and(|ext| ext == "nix") {
                 result.push(input);
             }
-            continue;
-        }
-
-        if input.is_dir() {
-            for entry in WalkDir::new(input)
-                .follow_links(false)
-                .into_iter()
-                .filter_map(|e| e.ok())
-            {
-                let path = entry.path();
-                if path.is_file() && path.extension().is_some_and(|ext| ext == "nix") {
-                    result.push(path.to_path_buf());
-                }
-            }
+        } else if input.is_dir() {
+            result.extend(
+                WalkDir::new(input)
+                    .follow_links(false)
+                    .into_iter()
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.file_type().is_file())
+                    .filter(|e| e.path().extension().is_some_and(|ext| ext == "nix"))
+                    .map(|e| e.into_path()),
+            );
         }
     }
 
@@ -66,9 +62,9 @@ fn main() -> Result<()> {
         .build_global()?;
 
     let mut registry = RuleRegistry::new();
-    registry.register(FlakeInputRule::new());
-    registry.register(FetcherRule::new());
-    registry.register(MkDerivationRule::new());
+    registry.register(FlakeInputRule);
+    registry.register(FetcherRule);
+    registry.register(MkDerivationRule);
 
     let results: Vec<_> = files.par_iter().map(|p| check_file(p, &registry)).collect();
 

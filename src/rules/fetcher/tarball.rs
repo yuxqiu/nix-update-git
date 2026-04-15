@@ -6,9 +6,9 @@ use crate::utils::{NarHash, TarballHasher};
 
 use super::kind::FetcherKind;
 
-// TODO:
-// 1. Add tests
-// 2. Ensure symbolic rev like tag works.
+// TODO: Check whether the following url works for all platforms and
+// see if symbolic refs (tags) need to be resolved to commit SHAs before
+// constructing tarball URLs.
 fn build_tarball_url(
     kind: &FetcherKind,
     params: &HashMap<String, String>,

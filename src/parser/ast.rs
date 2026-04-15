@@ -51,13 +51,36 @@ impl NixFile {
     }
 }
 
+const VALUE_KINDS: [rnix::SyntaxKind; 15] = [
+    rnix::SyntaxKind::NODE_STRING,
+    rnix::SyntaxKind::NODE_ATTR_SET,
+    rnix::SyntaxKind::NODE_LIST,
+    rnix::SyntaxKind::NODE_LITERAL,
+    rnix::SyntaxKind::NODE_IDENT,
+    rnix::SyntaxKind::NODE_APPLY,
+    rnix::SyntaxKind::NODE_SELECT,
+    rnix::SyntaxKind::NODE_PAREN,
+    rnix::SyntaxKind::NODE_UNARY_OP,
+    rnix::SyntaxKind::NODE_BIN_OP,
+    rnix::SyntaxKind::NODE_IF_ELSE,
+    rnix::SyntaxKind::NODE_WITH,
+    rnix::SyntaxKind::NODE_ASSERT,
+    rnix::SyntaxKind::NODE_LET_IN,
+    rnix::SyntaxKind::NODE_LAMBDA,
+];
+
+fn syntax_node_text_trimmed(node: &rnix::SyntaxNode) -> String {
+    let s = node.text().to_string();
+    s.trim().to_string()
+}
+
 fn collect_select_path(node: &rnix::SyntaxNode) -> Vec<String> {
     let mut parts = Vec::new();
 
     fn collect_from_attrpath(node: &rnix::SyntaxNode, parts: &mut Vec<String>) {
         for child in node.children() {
             if child.kind() == rnix::SyntaxKind::NODE_IDENT {
-                parts.push(child.text().to_string().trim().to_string());
+                parts.push(syntax_node_text_trimmed(&child));
             } else if child.kind() == rnix::SyntaxKind::NODE_SELECT {
                 collect_select_parts(&child, parts);
             }
@@ -73,13 +96,13 @@ fn collect_select_path(node: &rnix::SyntaxNode) -> Vec<String> {
             if first.kind() == rnix::SyntaxKind::NODE_SELECT {
                 collect_select_parts(first, parts);
             } else if first.kind() == rnix::SyntaxKind::NODE_IDENT {
-                parts.push(first.text().to_string().trim().to_string());
+                parts.push(syntax_node_text_trimmed(first));
             }
 
             if last.kind() == rnix::SyntaxKind::NODE_ATTRPATH {
                 collect_from_attrpath(last, parts);
             } else if last.kind() == rnix::SyntaxKind::NODE_IDENT {
-                parts.push(last.text().to_string().trim().to_string());
+                parts.push(syntax_node_text_trimmed(last));
             }
         }
     }
@@ -105,6 +128,11 @@ impl NixNode {
 
     pub fn text(&self) -> String {
         self.node.text().to_string()
+    }
+
+    pub fn text_trimmed(&self) -> String {
+        let s = self.node.text().to_string();
+        s.trim().to_string()
     }
 
     pub fn children(&self) -> Vec<NixNode> {
@@ -143,7 +171,7 @@ impl NixNode {
                 return child
                     .children()
                     .filter(|c| c.kind() == rnix::SyntaxKind::NODE_IDENT)
-                    .map(|c| c.text().to_string().trim().to_string())
+                    .map(|c| syntax_node_text_trimmed(&c))
                     .collect();
             }
         }
@@ -154,25 +182,8 @@ impl NixNode {
         if self.kind() != rnix::SyntaxKind::NODE_ATTRPATH_VALUE {
             return None;
         }
-        let value_kinds = [
-            rnix::SyntaxKind::NODE_STRING,
-            rnix::SyntaxKind::NODE_ATTR_SET,
-            rnix::SyntaxKind::NODE_LIST,
-            rnix::SyntaxKind::NODE_LITERAL,
-            rnix::SyntaxKind::NODE_IDENT,
-            rnix::SyntaxKind::NODE_APPLY,
-            rnix::SyntaxKind::NODE_SELECT,
-            rnix::SyntaxKind::NODE_PAREN,
-            rnix::SyntaxKind::NODE_UNARY_OP,
-            rnix::SyntaxKind::NODE_BIN_OP,
-            rnix::SyntaxKind::NODE_IF_ELSE,
-            rnix::SyntaxKind::NODE_WITH,
-            rnix::SyntaxKind::NODE_ASSERT,
-            rnix::SyntaxKind::NODE_LET_IN,
-            rnix::SyntaxKind::NODE_LAMBDA,
-        ];
         for child in self.node.children() {
-            if value_kinds.contains(&child.kind()) {
+            if VALUE_KINDS.contains(&child.kind()) {
                 return Some(NixNode::new(child, self.source.clone()));
             }
         }
@@ -315,7 +326,7 @@ impl NixNode {
         }
         for child in self.children() {
             if child.kind() == rnix::SyntaxKind::NODE_IDENT {
-                return Some(child.text().trim().to_string());
+                return Some(child.text_trimmed());
             }
             if child.kind() == rnix::SyntaxKind::NODE_SELECT {
                 let parts = collect_select_path(&child.node);
@@ -340,9 +351,8 @@ impl NixNode {
         let entry = self.find_attr_by_key(key)?;
         let value = entry.attr_value()?;
         if value.kind() == rnix::SyntaxKind::NODE_IDENT {
-            let text = value.text();
-            let trimmed = text.trim();
-            match trimmed {
+            let trimmed = value.text_trimmed();
+            match trimmed.as_str() {
                 "true" => Some(true),
                 "false" => Some(false),
                 _ => None,

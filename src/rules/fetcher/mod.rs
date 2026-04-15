@@ -52,8 +52,13 @@ pub(crate) fn preferred_ref_key(params: &HashMap<String, String>) -> Option<&'st
     }
 }
 
-pub(crate) fn resolve_ref_for_prefetch(git_url: &str, ref_value: &str) -> Option<String> {
-    let _ = git_url;
+/// Resolve a ref value to a revision suitable for prefetching.
+///
+/// Currently returns the ref as-is for non-empty values (commit hashes
+/// and symbolic refs like tags are passed through unchanged). The
+/// `git_url` parameter is reserved for future use where symbolic refs
+/// may be resolved to commit SHAs via `git ls-remote`.
+pub(crate) fn resolve_ref_for_prefetch(_git_url: &str, ref_value: &str) -> Option<String> {
     if ref_value.is_empty() {
         return None;
     }
@@ -69,13 +74,10 @@ struct FetcherCall {
     sparse_checkout: Vec<String>,
 }
 
+#[derive(Default)]
 pub struct FetcherRule;
 
 impl FetcherRule {
-    pub fn new() -> Self {
-        Self
-    }
-
     fn try_extract_call(node: &NixNode) -> Option<FetcherCall> {
         let func_name = node.apply_function_name()?;
         let kind = FetcherKind::from_name(&func_name)?;
@@ -368,12 +370,6 @@ impl FetcherRule {
     }
 }
 
-impl Default for FetcherRule {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl UpdateRule for FetcherRule {
     fn name(&self) -> &str {
         "fetcher"
@@ -530,7 +526,7 @@ stdenv.mkDerivation rec {
 "#;
         let root = parse_root(content);
         let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
-        let rule = super::FetcherRule::new();
+        let rule = super::FetcherRule;
         assert!(!rule.matches(&fetcher_node));
     }
 
@@ -547,7 +543,7 @@ stdenv.mkDerivation rec {
 "#;
         let root = parse_root(content);
         let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
-        let rule = super::FetcherRule::new();
+        let rule = super::FetcherRule;
         assert!(rule.matches(&fetcher_node));
     }
 
@@ -566,7 +562,7 @@ stdenv.mkDerivation rec {
 "#;
         let root = parse_root(content);
         let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
-        let rule = super::FetcherRule::new();
+        let rule = super::FetcherRule;
         assert!(rule.matches(&fetcher_node));
     }
 

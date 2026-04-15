@@ -51,13 +51,10 @@ struct InputDef {
     pinned: bool,
 }
 
+#[derive(Default)]
 pub struct FlakeInputRule;
 
 impl FlakeInputRule {
-    pub fn new() -> Self {
-        Self
-    }
-
     fn parse_flake_url(url: &str) -> Option<ParsedFlakeUrl> {
         let url = url.trim();
 
@@ -394,12 +391,6 @@ impl FlakeInputRule {
             value: content,
             range,
         })
-    }
-}
-
-impl Default for FlakeInputRule {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

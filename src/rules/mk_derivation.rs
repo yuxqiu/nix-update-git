@@ -36,13 +36,10 @@ enum SourceRefValue {
     InterpolatedFromVersion { template_node: NixNode },
 }
 
+#[derive(Default)]
 pub struct MkDerivationRule;
 
 impl MkDerivationRule {
-    pub fn new() -> Self {
-        Self
-    }
-
     fn try_extract_call(node: &NixNode) -> Option<MkDerivationCall> {
         let func_name = node.apply_function_name()?;
         let short_name = func_name.rsplit('.').next().unwrap_or(&func_name);
@@ -373,12 +370,6 @@ impl MkDerivationRule {
         } else {
             Ok(Some(updates))
         }
-    }
-}
-
-impl Default for MkDerivationRule {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

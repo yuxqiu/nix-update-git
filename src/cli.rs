@@ -1,6 +1,6 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum OutputFormat {
     Text,
     Json,
@@ -26,12 +26,7 @@ pub struct Cli {
     #[arg(short, long, help = "Enable verbose output")]
     pub verbose: bool,
 
-    #[arg(
-        long,
-        value_name = "FORMAT",
-        default_value = "text",
-        help = "Output format: text or json"
-    )]
+    #[arg(long, value_enum, default_value = "text", help = "Output format")]
     pub format: OutputFormat,
 
     #[arg(
@@ -42,18 +37,4 @@ pub struct Cli {
         help = "Number of parallel file processing jobs"
     )]
     pub jobs: usize,
-}
-
-impl std::str::FromStr for OutputFormat {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "text" => Ok(Self::Text),
-            "json" => Ok(Self::Json),
-            _ => Err(format!(
-                "unknown output format: {s} (expected 'text' or 'json')"
-            )),
-        }
-    }
 }
