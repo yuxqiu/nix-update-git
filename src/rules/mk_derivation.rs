@@ -4,8 +4,9 @@ use anyhow::Result;
 
 use crate::parser::{NixNode, TextRange};
 use crate::rules::fetcher::{
-    git_fetch, is_commit_hash, kind::FetcherKind, kind::HashStrategy, preferred_ref_key,
-    resolve_ref_for_prefetch, tarball,
+    InterpolationSpec, OPERATIONAL_KEYS, git_fetch, is_commit_hash, kind::FetcherKind,
+    kind::HashStrategy, parse_fetcher_attrset, preferred_ref_key, resolve_ref_for_prefetch,
+    tarball,
 };
 use crate::rules::traits::{Update, UpdateRule};
 use crate::utils::{GitFetcher, NarHash, VersionDetector};
@@ -77,61 +78,34 @@ impl MkDerivationRule {
             return None;
         }
 
-        let mut params = HashMap::new();
-        let mut source_ranges = HashMap::new();
-        let mut sparse_checkout = Vec::new();
-        let mut interpolated_source_refs: HashMap<String, NixNode> = HashMap::new();
-
-        for child in src_arg.children() {
-            if child.kind() != rnix::SyntaxKind::NODE_ATTRPATH_VALUE {
-                continue;
-            }
-            let segments = child.attrpath_segments();
-            if segments.len() != 1 {
-                continue;
-            }
-            let key = segments[0].clone();
-
-            if let Some(value) = child.attr_value() {
-                if value.kind() == rnix::SyntaxKind::NODE_STRING {
-                    let range = value.text_range();
-                    source_ranges.insert(key.clone(), range);
-
-                    if let Some(content) = value.pure_string_content() {
-                        params.insert(key.clone(), content);
-                    } else if is_recursive && (key == "tag" || key == "rev" || key == "ref") {
-                        let mut vars = HashMap::new();
-                        vars.insert("version".to_string(), version_content.clone());
-                        if value.interpolated_string_content(&vars).is_some() {
-                            interpolated_source_refs.insert(key.clone(), value);
-                        }
-                    }
-                } else if value.kind() == rnix::SyntaxKind::NODE_IDENT {
-                    let text = value.text();
-                    let trimmed = text.trim();
-                    if trimmed == "true" || trimmed == "false" {
-                        params.insert(key.clone(), trimmed.to_string());
-                    }
-                } else if key == "sparseCheckout" && value.kind() == rnix::SyntaxKind::NODE_LIST {
-                    for item in value.children() {
-                        if item.kind() == rnix::SyntaxKind::NODE_STRING
-                            && let Some(content) = item.pure_string_content()
-                        {
-                            sparse_checkout.push(content);
-                        }
-                    }
-                }
-            }
+        let mut spec = InterpolationSpec::none();
+        if is_recursive {
+            let version_vars = HashMap::from([("version".to_string(), version_content.clone())]);
+            spec.allow("tag", version_vars.clone());
+            spec.allow("rev", version_vars.clone());
+            spec.allow("ref", version_vars);
         }
 
-        let source_ref_key = preferred_ref_key(&params)
+        let mut attrs = parse_fetcher_attrset(&src_arg, &spec);
+
+        // Conservatively skip if any operational key is interpolated but
+        // not permitted by the spec (e.g., url, owner, repo).
+        if attrs
+            .interpolated_unresolved
+            .iter()
+            .any(|k| OPERATIONAL_KEYS.contains(&k.as_str()))
+        {
+            return None;
+        }
+
+        let source_ref_key = preferred_ref_key(&attrs.params)
             .map(|k| k.to_string())
             .or_else(|| {
-                if interpolated_source_refs.contains_key("tag") {
+                if attrs.interpolated.contains_key("tag") {
                     Some("tag".to_string())
-                } else if interpolated_source_refs.contains_key("rev") {
+                } else if attrs.interpolated.contains_key("rev") {
                     Some("rev".to_string())
-                } else if interpolated_source_refs.contains_key("ref") {
+                } else if attrs.interpolated.contains_key("ref") {
                     Some("ref".to_string())
                 } else {
                     None
@@ -139,9 +113,9 @@ impl MkDerivationRule {
             });
 
         let source_ref_value = if let Some(key) = &source_ref_key {
-            if let Some(value) = params.get(key) {
+            if let Some(value) = attrs.params.get(key) {
                 SourceRefValue::Pure(value.clone())
-            } else if let Some(template_node) = interpolated_source_refs.remove(key) {
+            } else if let Some(template_node) = attrs.interpolated.remove(key) {
                 SourceRefValue::InterpolatedFromVersion { template_node }
             } else {
                 SourceRefValue::Missing
@@ -152,7 +126,7 @@ impl MkDerivationRule {
 
         let source_ref_range = source_ref_key
             .as_ref()
-            .and_then(|key| source_ranges.get(key))
+            .and_then(|key| attrs.source_ranges.get(key))
             .copied();
 
         let pinned = arg.has_pin_comment()
@@ -167,9 +141,9 @@ impl MkDerivationRule {
             source_ref_value,
             source_ref_range,
             fetcher_kind,
-            fetcher_params: params,
-            fetcher_source_ranges: source_ranges,
-            fetcher_sparse_checkout: sparse_checkout,
+            fetcher_params: attrs.params,
+            fetcher_source_ranges: attrs.source_ranges,
+            fetcher_sparse_checkout: attrs.sparse_checkout,
             pinned,
         })
     }

@@ -611,3 +611,47 @@ fn test_fetcher_builtins_fetch_git_dotted() {
         .success()
         .stdout(predicates::str::contains("builtins.fetchGit.ref"));
 }
+
+#[test]
+fn test_fetcher_skips_interpolated_url() {
+    // A fetcher with an interpolated url (operational key) should be
+    // conservatively skipped rather than producing incorrect results.
+    let nix_content = r#"{
+  src = fetchgit {
+    url = "https://example.com/${name}";
+    rev = "v1.0.0";
+    hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  };
+}"#;
+    let nix_dir = tempdir().unwrap();
+    let nix_path = nix_dir.path().join("test.nix");
+    fs::write(&nix_path, nix_content).unwrap();
+
+    let mut cmd = Command::cargo_bin("nix-update-git").unwrap();
+    cmd.arg("--verbose").arg(nix_path.to_str().unwrap());
+    cmd.assert()
+        .success()
+        .stdout(predicates::str::contains("No updates found"));
+}
+
+#[test]
+fn test_fetcher_skips_interpolated_rev() {
+    // A fetcher with an interpolated rev (operational key) should be
+    // conservatively skipped.
+    let nix_content = r#"{
+  src = fetchgit {
+    url = "https://example.com/repo";
+    rev = "v${version}";
+    hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  };
+}"#;
+    let nix_dir = tempdir().unwrap();
+    let nix_path = nix_dir.path().join("test.nix");
+    fs::write(&nix_path, nix_content).unwrap();
+
+    let mut cmd = Command::cargo_bin("nix-update-git").unwrap();
+    cmd.arg("--verbose").arg(nix_path.to_str().unwrap());
+    cmd.assert()
+        .success()
+        .stdout(predicates::str::contains("No updates found"));
+}

@@ -64,6 +64,147 @@ pub(crate) fn resolve_ref_for_prefetch(_git_url: &str, ref_value: &str) -> Optio
     }
     Some(ref_value.to_string())
 }
+/// Keys that affect version resolution, URL construction, or hash
+/// computation in a fetcher call. If any of these are interpolated
+/// and not permitted by the `InterpolationSpec`, we conservatively
+/// skip the call.
+pub(crate) const OPERATIONAL_KEYS: &[&str] = &[
+    "url",
+    "owner",
+    "repo",
+    "domain",
+    "githubBase",
+    "vc",
+    "tag",
+    "rev",
+    "ref",
+    "hash",
+    "sha256",
+    "fetchSubmodules",
+    "submodules",
+    "deepClone",
+    "leaveDotGit",
+    "fetchLFS",
+    "branchName",
+    "rootDir",
+];
+
+/// Specifies which fetcher attribute fields are allowed to contain
+/// string interpolation, and what variable bindings are available
+/// for resolution verification.
+pub(crate) struct InterpolationSpec {
+    /// Map from field name to variable bindings.
+    /// E.g., `{"rev": {"version": "1.0.0"}}` means the `rev` field
+    /// may use `${version}` interpolation.
+    allowed: HashMap<String, HashMap<String, String>>,
+}
+
+impl InterpolationSpec {
+    /// Create a spec that does not allow any interpolated fields.
+    pub(crate) fn none() -> Self {
+        Self {
+            allowed: HashMap::new(),
+        }
+    }
+
+    /// Allow a specific field to be interpolated with the given
+    /// variable bindings. The parser will verify that the
+    /// interpolation can be fully resolved using these variables
+    /// before accepting the field.
+    pub(crate) fn allow(&mut self, field: &str, vars: HashMap<String, String>) {
+        self.allowed.insert(field.to_string(), vars);
+    }
+}
+
+/// Result of parsing a fetcher attrset.
+pub(crate) struct FetcherAttrs {
+    /// Pure (non-interpolated) string values and boolean ident values.
+    pub params: HashMap<String, String>,
+    /// Byte ranges of all string-valued attributes (both pure and
+    /// interpolated).
+    pub source_ranges: HashMap<String, TextRange>,
+    /// Interpolated attributes that matched the `InterpolationSpec`
+    /// (field is allowed and the interpolation can be resolved with
+    /// the given variables). The template node is stored for callers
+    /// that need to extract affixes or re-resolve with different
+    /// variable values.
+    pub interpolated: HashMap<String, NixNode>,
+    /// Interpolated attributes that did NOT match the
+    /// `InterpolationSpec` (either the field is not allowed, or the
+    /// interpolation couldn't be resolved with the given variables).
+    /// Only the key names are stored so callers can detect
+    /// unsupported interpolations in operational fields.
+    pub interpolated_unresolved: Vec<String>,
+    /// Items from the `sparseCheckout` list attribute.
+    pub sparse_checkout: Vec<String>,
+}
+
+/// Parse the attribute set of a fetcher call into structured fields.
+///
+/// The `InterpolationSpec` controls which fields may contain string
+/// interpolation. Fields whose interpolation matches the spec are
+/// stored in `FetcherAttrs::interpolated` with their template nodes.
+/// All other interpolated fields are recorded in
+/// `FetcherAttrs::interpolated_unresolved` so callers can detect
+/// unsupported interpolations (e.g., in operational keys).
+pub(crate) fn parse_fetcher_attrset(attr_set: &NixNode, spec: &InterpolationSpec) -> FetcherAttrs {
+    let mut params = HashMap::new();
+    let mut source_ranges = HashMap::new();
+    let mut interpolated = HashMap::new();
+    let mut interpolated_unresolved = Vec::new();
+    let mut sparse_checkout = Vec::new();
+
+    for child in attr_set.children() {
+        if child.kind() != rnix::SyntaxKind::NODE_ATTRPATH_VALUE {
+            continue;
+        }
+        let segments = child.attrpath_segments();
+        if segments.len() != 1 {
+            continue;
+        }
+        let key = segments[0].clone();
+
+        if let Some(value) = child.attr_value() {
+            if value.kind() == rnix::SyntaxKind::NODE_STRING {
+                let range = value.text_range();
+                source_ranges.insert(key.clone(), range);
+
+                if let Some(content) = value.pure_string_content() {
+                    params.insert(key, content);
+                } else if let Some(vars) = spec.allowed.get(&key) {
+                    if value.interpolated_string_content(vars).is_some() {
+                        interpolated.insert(key, value);
+                    } else {
+                        interpolated_unresolved.push(key);
+                    }
+                } else {
+                    interpolated_unresolved.push(key);
+                }
+            } else if value.kind() == rnix::SyntaxKind::NODE_IDENT {
+                let trimmed = value.text_trimmed();
+                if trimmed == "true" || trimmed == "false" {
+                    params.insert(key, trimmed);
+                }
+            } else if key == "sparseCheckout" && value.kind() == rnix::SyntaxKind::NODE_LIST {
+                for item in value.children() {
+                    if item.kind() == rnix::SyntaxKind::NODE_STRING
+                        && let Some(content) = item.pure_string_content()
+                    {
+                        sparse_checkout.push(content);
+                    }
+                }
+            }
+        }
+    }
+
+    FetcherAttrs {
+        params,
+        source_ranges,
+        interpolated,
+        interpolated_unresolved,
+        sparse_checkout,
+    }
+}
 
 struct FetcherCall {
     kind: FetcherKind,
@@ -87,42 +228,16 @@ impl FetcherRule {
             return None;
         }
 
-        let mut params = HashMap::new();
-        let mut source_ranges = HashMap::new();
-        let mut sparse_checkout = Vec::new();
+        let attrs = parse_fetcher_attrset(&arg, &InterpolationSpec::none());
 
-        for child in arg.children() {
-            if child.kind() != rnix::SyntaxKind::NODE_ATTRPATH_VALUE {
-                continue;
-            }
-            let segments = child.attrpath_segments();
-            if segments.len() != 1 {
-                continue;
-            }
-            let key = segments[0].clone();
-
-            if let Some(value) = child.attr_value() {
-                if value.kind() == rnix::SyntaxKind::NODE_STRING {
-                    if let Some(content) = value.pure_string_content() {
-                        params.insert(key.clone(), content);
-                        source_ranges.insert(key, value.text_range());
-                    }
-                } else if value.kind() == rnix::SyntaxKind::NODE_IDENT {
-                    let text = value.text();
-                    let trimmed = text.trim();
-                    if trimmed == "true" || trimmed == "false" {
-                        params.insert(key.clone(), trimmed.to_string());
-                    }
-                } else if key == "sparseCheckout" && value.kind() == rnix::SyntaxKind::NODE_LIST {
-                    for item in value.children() {
-                        if item.kind() == rnix::SyntaxKind::NODE_STRING
-                            && let Some(content) = item.pure_string_content()
-                        {
-                            sparse_checkout.push(content);
-                        }
-                    }
-                }
-            }
+        // Conservatively skip if any operational key is interpolated
+        // but not permitted by the spec (which is empty here).
+        if attrs
+            .interpolated_unresolved
+            .iter()
+            .any(|k| OPERATIONAL_KEYS.contains(&k.as_str()))
+        {
+            return None;
         }
 
         let pinned = arg.has_pin_comment() || node.has_pin_comment();
@@ -132,11 +247,11 @@ impl FetcherRule {
 
         Some(FetcherCall {
             kind,
-            params,
-            source_ranges,
+            params: attrs.params,
+            source_ranges: attrs.source_ranges,
             pinned,
             follow_branch,
-            sparse_checkout,
+            sparse_checkout: attrs.sparse_checkout,
         })
     }
 
@@ -396,6 +511,8 @@ impl UpdateRule for FetcherRule {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use crate::parser::NixFile;
     use crate::rules::traits::UpdateRule;
 
@@ -577,5 +694,130 @@ stdenv.mkDerivation rec {
         let rev = "4f56fd184ef6020626492a6f954a486d54f8b7ba";
         let result = super::resolve_ref_for_prefetch("https://example.com/repo", rev);
         assert_eq!(result.as_deref(), Some(rev));
+    }
+
+    #[test]
+    fn test_parse_fetcher_attrset_pure_strings() {
+        let content = r#"{ url = "https://example.com"; rev = "v1.0"; fetchSubmodules = true; }"#;
+        let root = parse_root(content);
+        let attr_set = root
+            .traverse()
+            .find(|n| n.kind() == rnix::SyntaxKind::NODE_ATTR_SET)
+            .unwrap();
+        let attrs = super::parse_fetcher_attrset(&attr_set, &super::InterpolationSpec::none());
+        assert_eq!(
+            attrs.params.get("url"),
+            Some(&"https://example.com".to_string())
+        );
+        assert_eq!(attrs.params.get("rev"), Some(&"v1.0".to_string()));
+        assert_eq!(
+            attrs.params.get("fetchSubmodules"),
+            Some(&"true".to_string())
+        );
+        assert!(attrs.interpolated.is_empty());
+        assert!(attrs.interpolated_unresolved.is_empty());
+        assert!(attrs.source_ranges.contains_key("url"));
+        assert!(attrs.source_ranges.contains_key("rev"));
+    }
+
+    #[test]
+    fn test_parse_fetcher_attrset_interpolated_unresolved_with_no_spec() {
+        let content = r#"{ url = "https://example.com/${name}"; rev = "v1.0"; }"#;
+        let root = parse_root(content);
+        let attr_set = root
+            .traverse()
+            .find(|n| n.kind() == rnix::SyntaxKind::NODE_ATTR_SET)
+            .unwrap();
+        let attrs = super::parse_fetcher_attrset(&attr_set, &super::InterpolationSpec::none());
+        // url is interpolated but not allowed by spec → unresolved
+        assert!(!attrs.params.contains_key("url"));
+        assert_eq!(attrs.interpolated_unresolved, vec!["url"]);
+        // rev is pure → parsed normally
+        assert_eq!(attrs.params.get("rev"), Some(&"v1.0".to_string()));
+        assert!(attrs.interpolated.is_empty());
+        // Range still recorded for url (it's a string node)
+        assert!(attrs.source_ranges.contains_key("url"));
+    }
+
+    #[test]
+    fn test_parse_fetcher_attrset_interpolated_allowed_by_spec() {
+        let content = r#"{ rev = "v${version}"; version = "1.0"; }"#;
+        let root = parse_root(content);
+        let attr_set = root
+            .traverse()
+            .find(|n| n.kind() == rnix::SyntaxKind::NODE_ATTR_SET)
+            .unwrap();
+        let mut spec = super::InterpolationSpec::none();
+        spec.allow(
+            "rev",
+            HashMap::from([("version".to_string(), "1.0".to_string())]),
+        );
+        let attrs = super::parse_fetcher_attrset(&attr_set, &spec);
+        // rev is interpolated and allowed → goes to interpolated
+        assert!(attrs.interpolated.contains_key("rev"));
+        assert!(attrs.interpolated_unresolved.is_empty());
+        assert!(!attrs.params.contains_key("rev"));
+        // version is pure → parsed normally
+        assert_eq!(attrs.params.get("version"), Some(&"1.0".to_string()));
+    }
+
+    #[test]
+    fn test_parse_fetcher_attrset_interpolated_not_matching_spec() {
+        let content = r#"{ rev = "v${unknown}"; }"#;
+        let root = parse_root(content);
+        let attr_set = root
+            .traverse()
+            .find(|n| n.kind() == rnix::SyntaxKind::NODE_ATTR_SET)
+            .unwrap();
+        let mut spec = super::InterpolationSpec::none();
+        spec.allow(
+            "rev",
+            HashMap::from([("version".to_string(), "1.0".to_string())]),
+        );
+        let attrs = super::parse_fetcher_attrset(&attr_set, &spec);
+        // rev uses ${unknown} but spec only provides version → unresolved
+        assert!(attrs.interpolated.is_empty());
+        assert_eq!(attrs.interpolated_unresolved, vec!["rev"]);
+    }
+
+    #[test]
+    fn test_fetcher_skips_interpolated_operational_key() {
+        let content = r#"
+{
+  src = fetchgit {
+    url = "https://example.com/${name}";
+    rev = "v1.0.0";
+    hash = "sha256-AAA=";
+  };
+}
+"#;
+        let root = parse_root(content);
+        let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
+        // try_extract_call should return None because url (an
+        // operational key) is interpolated but not permitted.
+        assert!(super::FetcherRule::try_extract_call(&fetcher_node).is_none());
+    }
+
+    #[test]
+    fn test_fetcher_allows_non_operational_interpolated_key() {
+        // A non-operational key like "name" being interpolated should
+        // not cause the fetcher to be skipped.
+        let content = r#"
+{
+  src = fetchgit {
+    url = "https://example.com/repo";
+    rev = "v1.0.0";
+    hash = "sha256-AAA=";
+    name = "foo-${version}";
+  };
+}
+"#;
+        let root = parse_root(content);
+        let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
+        // "name" is not in OPERATIONAL_KEYS, so the call should still
+        // be extracted (rev is pure).
+        let call = super::FetcherRule::try_extract_call(&fetcher_node);
+        assert!(call.is_some());
+        assert_eq!(call.unwrap().params.get("rev"), Some(&"v1.0.0".to_string()));
     }
 }
