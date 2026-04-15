@@ -96,14 +96,13 @@ fn test_mk_derivation_skips_when_rev_is_version() {
     fs::write(&nix_path, &nix_content).unwrap();
 
     // When rev is a version (not a hash), the mkDerivation rule skips it.
-    // The fetcher rule handles version-in-rev updates instead, so we expect
-    // the fetcher rule to produce an update — not "No updates found".
+    // The fetcher rule also skips because it's inside mkDerivation's src.
+    // So neither rule matches and we get "No updates found".
     let mut cmd = Command::cargo_bin("nix-update-git").unwrap();
-    cmd.arg(nix_path.to_str().unwrap());
+    cmd.arg("--verbose").arg(nix_path.to_str().unwrap());
     cmd.assert()
         .success()
-        .stdout(predicates::str::contains("fetcher"))
-        .stdout(predicates::str::contains("fetchgit.rev"));
+        .stdout(predicates::str::contains("No updates found"));
 }
 
 #[test]

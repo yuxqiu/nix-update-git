@@ -309,6 +309,55 @@ impl FetcherRule {
             HashStrategy::None => anyhow::bail!("No hash needed for this fetcher"),
         }
     }
+
+    fn is_src_of_active_mk_derivation(node: &NixNode) -> bool {
+        let mut current = match node.parent() {
+            Some(p) => p,
+            None => return false,
+        };
+
+        while current.kind() == rnix::SyntaxKind::NODE_PAREN {
+            current = match current.parent() {
+                Some(p) => p,
+                None => return false,
+            };
+        }
+
+        if current.kind() != rnix::SyntaxKind::NODE_ATTRPATH_VALUE {
+            return false;
+        }
+        let segments = current.attrpath_segments();
+        if segments.len() != 1 || segments[0] != "src" {
+            return false;
+        }
+
+        let attr_set = match current.parent() {
+            Some(p) => p,
+            None => return false,
+        };
+        if attr_set.kind() != rnix::SyntaxKind::NODE_ATTR_SET {
+            return false;
+        }
+
+        let mk_derivation_apply = match attr_set.parent() {
+            Some(p) => p,
+            None => return false,
+        };
+        if mk_derivation_apply.kind() != rnix::SyntaxKind::NODE_APPLY {
+            return false;
+        }
+
+        let func_name = match mk_derivation_apply.apply_function_name() {
+            Some(name) => name,
+            None => return false,
+        };
+        let short_name = func_name.rsplit('.').next().unwrap_or(&func_name);
+        if short_name != "mkDerivation" {
+            return false;
+        }
+
+        true
+    }
 }
 
 impl Default for FetcherRule {
@@ -323,7 +372,13 @@ impl UpdateRule for FetcherRule {
     }
 
     fn matches(&self, node: &NixNode) -> bool {
-        node.kind() == rnix::SyntaxKind::NODE_APPLY
+        if node.kind() != rnix::SyntaxKind::NODE_APPLY {
+            return false;
+        }
+        if Self::is_src_of_active_mk_derivation(node) {
+            return false;
+        }
+        true
     }
 
     fn check(&self, node: &NixNode) -> Result<Option<Vec<Update>>> {
@@ -332,5 +387,178 @@ impl UpdateRule for FetcherRule {
             None => return Ok(None),
         };
         self.check_fetcher_call(&call)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::parser::NixFile;
+    use crate::rules::traits::UpdateRule;
+
+    fn parse_root(content: &str) -> crate::parser::NixNode {
+        NixFile::parse(content).unwrap().root_node()
+    }
+
+    fn find_fetcher_apply(
+        root: &crate::parser::NixNode,
+        name: &str,
+    ) -> Option<crate::parser::NixNode> {
+        root.traverse().find(|node| {
+            node.kind() == rnix::SyntaxKind::NODE_APPLY
+                && node.apply_function_name().as_deref() == Some(name)
+        })
+    }
+
+    #[test]
+    fn test_is_src_of_mk_derivation_returns_true() {
+        let content = r#"
+stdenv.mkDerivation rec {
+  name = "foo-${version}";
+  version = "v1.0.0";
+  src = fetchgit {
+    url = "https://example.com/repo";
+    rev = "0000000000000000000000000000000000000000";
+    sha256 = "0nmyp5yrzl9dbq85wyiimsj9fklb8637a1936nw7zzvlnzkgh28n";
+  };
+}
+"#;
+        let root = parse_root(content);
+        let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
+        assert!(super::FetcherRule::is_src_of_active_mk_derivation(
+            &fetcher_node
+        ));
+    }
+
+    #[test]
+    fn test_standalone_fetcher_returns_false() {
+        let content = r#"
+{
+  src = fetchgit {
+    url = "https://example.com/repo";
+    rev = "v1.0.0";
+    hash = "sha256-AAA=";
+  };
+}
+"#;
+        let root = parse_root(content);
+        let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
+        assert!(!super::FetcherRule::is_src_of_active_mk_derivation(
+            &fetcher_node
+        ));
+    }
+
+    #[test]
+    fn test_pkgs_dot_stdenv_dot_mk_derivation_returns_true() {
+        let content = r#"
+pkgs.stdenv.mkDerivation rec {
+  name = "foo-${version}";
+  version = "v1.0.0";
+  src = fetchgit {
+    url = "https://example.com/repo";
+    rev = "0000000000000000000000000000000000000000";
+    sha256 = "0nmyp5yrzl9dbq85wyiimsj9fklb8637a1936nw7zzvlnzkgh28n";
+  };
+}
+"#;
+        let root = parse_root(content);
+        let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
+        assert!(super::FetcherRule::is_src_of_active_mk_derivation(
+            &fetcher_node
+        ));
+    }
+
+    #[test]
+    fn test_fetcher_non_src_attr_returns_false() {
+        let content = r#"
+stdenv.mkDerivation rec {
+  name = "foo-${version}";
+  version = "v1.0.0";
+  patches = fetchgit {
+    url = "https://example.com/repo";
+    rev = "v1.0.0";
+    hash = "sha256-AAA=";
+  };
+}
+"#;
+        let root = parse_root(content);
+        let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
+        assert!(!super::FetcherRule::is_src_of_active_mk_derivation(
+            &fetcher_node
+        ));
+    }
+
+    #[test]
+    fn test_fetcher_in_non_mk_derivation_returns_false() {
+        let content = r#"
+someOtherFunc rec {
+  name = "foo-${version}";
+  version = "v1.0.0";
+  src = fetchgit {
+    url = "https://example.com/repo";
+    rev = "v1.0.0";
+    hash = "sha256-AAA=";
+  };
+}
+"#;
+        let root = parse_root(content);
+        let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
+        assert!(!super::FetcherRule::is_src_of_active_mk_derivation(
+            &fetcher_node
+        ));
+    }
+
+    #[test]
+    fn test_matches_excludes_src_in_mk_derivation() {
+        let content = r#"
+stdenv.mkDerivation rec {
+  name = "foo-${version}";
+  version = "v1.0.0";
+  src = fetchgit {
+    url = "https://example.com/repo";
+    rev = "0000000000000000000000000000000000000000";
+    sha256 = "0nmyp5yrzl9dbq85wyiimsj9fklb8637a1936nw7zzvlnzkgh28n";
+  };
+}
+"#;
+        let root = parse_root(content);
+        let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
+        let rule = super::FetcherRule::new();
+        assert!(!rule.matches(&fetcher_node));
+    }
+
+    #[test]
+    fn test_matches_allows_standalone_fetcher() {
+        let content = r#"
+{
+  src = fetchgit {
+    url = "https://example.com/repo";
+    rev = "v1.0.0";
+    hash = "sha256-AAA=";
+  };
+}
+"#;
+        let root = parse_root(content);
+        let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
+        let rule = super::FetcherRule::new();
+        assert!(rule.matches(&fetcher_node));
+    }
+
+    #[test]
+    fn test_matches_allows_patches_in_mk_derivation() {
+        let content = r#"
+stdenv.mkDerivation rec {
+  name = "foo-${version}";
+  version = "v1.0.0";
+  patches = fetchgit {
+    url = "https://example.com/repo";
+    rev = "v1.0.0";
+    hash = "sha256-AAA=";
+  };
+}
+"#;
+        let root = parse_root(content);
+        let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
+        let rule = super::FetcherRule::new();
+        assert!(rule.matches(&fetcher_node));
     }
 }

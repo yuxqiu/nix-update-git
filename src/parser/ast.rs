@@ -213,6 +213,12 @@ impl NixNode {
         value.string_content()
     }
 
+    pub fn parent(&self) -> Option<NixNode> {
+        self.node
+            .parent()
+            .map(|p| NixNode::new(p, self.source.clone()))
+    }
+
     pub fn text_range(&self) -> TextRange {
         let range = self.node.text_range();
         TextRange {
