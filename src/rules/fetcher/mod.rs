@@ -53,17 +53,11 @@ pub(crate) fn preferred_ref_key(params: &HashMap<String, String>) -> Option<&'st
 }
 
 pub(crate) fn resolve_ref_for_prefetch(git_url: &str, ref_value: &str) -> Option<String> {
+    let _ = git_url;
     if ref_value.is_empty() {
         return None;
     }
-    if is_commit_hash(ref_value) {
-        Some(ref_value.to_string())
-    } else {
-        GitFetcher::resolve_ref_to_sha(git_url, ref_value)
-            .ok()
-            .flatten()
-            .or_else(|| Some(ref_value.to_string()))
-    }
+    Some(ref_value.to_string())
 }
 
 struct FetcherCall {
@@ -254,11 +248,7 @@ impl FetcherRule {
                 *range,
             ));
 
-            let rev_for_prefetch = GitFetcher::resolve_ref_to_sha(git_url, &latest)
-                .ok()
-                .flatten();
-            let prefetch_rev = rev_for_prefetch.as_deref().unwrap_or(&latest);
-            Ok(Some(prefetch_rev.to_string()))
+            Ok(Some(latest))
         } else {
             Ok(None)
         }
@@ -578,5 +568,18 @@ stdenv.mkDerivation rec {
         let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
         let rule = super::FetcherRule::new();
         assert!(rule.matches(&fetcher_node));
+    }
+
+    #[test]
+    fn test_resolve_ref_for_prefetch_keeps_symbolic_ref() {
+        let result = super::resolve_ref_for_prefetch("https://example.com/repo", "v1.2.3");
+        assert_eq!(result.as_deref(), Some("v1.2.3"));
+    }
+
+    #[test]
+    fn test_resolve_ref_for_prefetch_keeps_commit_hash() {
+        let rev = "4f56fd184ef6020626492a6f954a486d54f8b7ba";
+        let result = super::resolve_ref_for_prefetch("https://example.com/repo", rev);
+        assert_eq!(result.as_deref(), Some(rev));
     }
 }

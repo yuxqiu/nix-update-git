@@ -33,7 +33,7 @@ impl NixPrefetcher {
             .output()
             .with_context(|| {
                 format!(
-                    "Failed to execute nix-prefetch-git {}for {} @ {}",
+                    "Failed to execute nix-prefetch-git {} for {} @ {}",
                     label, url, rev
                 )
             })?;
@@ -42,7 +42,7 @@ impl NixPrefetcher {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
             anyhow::bail!(
-                "nix-prefetch-git {}failed for {} @ {}: {}{}",
+                "nix-prefetch-git {} failed for {} @ {}: {}{}",
                 label,
                 url,
                 rev,

@@ -1,0 +1,16 @@
+---
+source: tests/snapshot/mod.rs
+expression: output_for_insta
+input_file: tests/snapshot/data/update-nix-fetchgit/upstream_builtins_fetchgit_sha256_ignored.nix
+---
+[
+  {
+    "rule": "fetcher",
+    "field": "builtins.fetchGit.ref",
+    "old": "\"v0.2.1\"",
+    "range": [
+      267,
+      275
+    ]
+  }
+]

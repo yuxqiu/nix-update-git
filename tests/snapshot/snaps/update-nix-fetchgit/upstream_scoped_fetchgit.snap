@@ -1,0 +1,25 @@
+---
+source: tests/snapshot/mod.rs
+expression: output_for_insta
+input_file: tests/snapshot/data/update-nix-fetchgit/upstream_scoped_fetchgit.nix
+---
+[
+  {
+    "rule": "fetcher",
+    "field": "fetchgit.rev",
+    "old": "\"v0.2.1\"",
+    "range": [
+      226,
+      234
+    ]
+  },
+  {
+    "rule": "fetcher",
+    "field": "fetchgit.hash",
+    "old": "\"\"",
+    "range": [
+      247,
+      249
+    ]
+  }
+]

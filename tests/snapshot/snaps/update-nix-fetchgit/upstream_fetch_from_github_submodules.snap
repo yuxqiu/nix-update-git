@@ -1,0 +1,17 @@
+---
+source: tests/snapshot/mod.rs
+expression: output_for_insta
+input_file: tests/snapshot/data/update-nix-fetchgit/upstream_fetch_from_github_submodules.nix
+---
+[
+  {
+    "rule": "fetcher",
+    "field": "fetchFromGitHub.hash",
+    "old": "\"\"",
+    "new": "\"sha256-byTyWAUSQmXSqoS6DLkdtfJyoxsrd1K55a5LiwAwaPA=\"",
+    "range": [
+      250,
+      252
+    ]
+  }
+]

@@ -152,11 +152,7 @@ impl FetcherKind {
         params: &HashMap<String, String>,
         has_sparse_checkout: bool,
     ) -> bool {
-        matches!(
-            self,
-            Self::FetchFromGitHub | Self::FetchFromGitLab | Self::FetchFromCodeberg
-        ) && !self.uses_fetchgit(params, has_sparse_checkout)
-            && !self.uses_fetch_submodules(params)
+        !self.uses_fetchgit(params, has_sparse_checkout) && !self.uses_fetch_submodules(params)
     }
 
     pub fn uses_fetch_submodules(&self, params: &HashMap<String, String>) -> bool {
@@ -503,20 +499,19 @@ mod tests {
     }
 
     #[test]
-    fn test_uses_tarball_github_gitlab_codeberg() {
+    fn test_uses_tarball_supported_fetchers() {
         let params = HashMap::new();
         assert!(FetcherKind::FetchFromGitHub.uses_tarball(&params, false));
         assert!(FetcherKind::FetchFromGitLab.uses_tarball(&params, false));
+        assert!(FetcherKind::FetchFromGitea.uses_tarball(&params, false));
+        assert!(FetcherKind::FetchFromForgejo.uses_tarball(&params, false));
         assert!(FetcherKind::FetchFromCodeberg.uses_tarball(&params, false));
-
+        assert!(FetcherKind::FetchFromSourcehut.uses_tarball(&params, false));
+        assert!(FetcherKind::FetchFromBitbucket.uses_tarball(&params, false));
+        assert!(FetcherKind::FetchFromGitiles.uses_tarball(&params, false));
+        assert!(FetcherKind::FetchFromSavannah.uses_tarball(&params, false));
+        assert!(FetcherKind::FetchFromRepoOrCz.uses_tarball(&params, false));
         assert!(!FetcherKind::FetchGit.uses_tarball(&params, false));
-        assert!(!FetcherKind::FetchFromGitea.uses_tarball(&params, false));
-        assert!(!FetcherKind::FetchFromForgejo.uses_tarball(&params, false));
-        assert!(!FetcherKind::FetchFromSourcehut.uses_tarball(&params, false));
-        assert!(!FetcherKind::FetchFromBitbucket.uses_tarball(&params, false));
-        assert!(!FetcherKind::FetchFromGitiles.uses_tarball(&params, false));
-        assert!(!FetcherKind::FetchFromSavannah.uses_tarball(&params, false));
-        assert!(!FetcherKind::FetchFromRepoOrCz.uses_tarball(&params, false));
         assert!(!FetcherKind::BuiltinsFetchGit.uses_tarball(&params, false));
     }
 
