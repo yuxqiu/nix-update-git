@@ -28,7 +28,9 @@ Nix builds exclude network tests via `cargoTestFlags = [ "--no-default-features"
 
 ## Architecture
 
-Single-crate Rust project. Edition 2024 (requires Rust ≥ 1.85).
+Workspace with two crates. Edition 2024 (requires Rust ≥ 1.85).
+
+- `nix-prefetch-git/` — pure-Rust reimplementation of the shell-based `nix-prefetch-git` from nixpkgs; clones a git repo, makes the checkout deterministic, and computes the NAR SHA-256 hash; exposes `PrefetchArgs`, `PrefetchResult`, `NarHash`, `prefetch()`, and `nar::hash_path()`
 
 - `src/cli.rs` — clap CLI definition (`--check`, `--update`, `--interactive`, `--verbose`, `--format`, `--jobs`)
 - `src/main.rs` — entry point; parallel check via rayon, then display/apply loop; binary-only modules: `check`, `output`, `patch`
@@ -39,15 +41,13 @@ Single-crate Rust project. Edition 2024 (requires Rust ≥ 1.85).
 - `src/rules/fetcher/mod.rs` — `FetcherRule` struct, `FetcherCall`, `UpdateRule` impl, `try_extract_call` (extracts a single fetcher call from one `NODE_APPLY`), `handle_branch_following`, `handle_version_update`; also handles empty hash filling via `try_prefetch_empty_hash` and hash prefetching via `try_prefetch_hash`; dispatches to `tarball` or `git_fetch` based on `HashStrategy`. `InterpolationSpec` controls which fetcher fields may contain interpolation: `allow()` for field-specific bindings, `allow_all()` for catch-all bindings merged on top, `allow_idents()` for bare ident resolution (e.g. `repo = pname`), and `vars_for_field()` merges `allow_all` + field-specific entries. Exposes shared helpers used by mkDerivation (`is_commit_hash`, `preferred_ref_key`, `resolve_ref_for_prefetch`, `version_ref_key_and_value`).
 - `src/rules/fetcher/kind.rs` — `FetcherKind` enum (all fetcher variants) and `HashStrategy` enum; methods for name lookup, URL construction, tarball/submodule detection, and hash strategy dispatch
 - `src/rules/fetcher/tarball.rs` — `compute_hash()` for tarball-based fetchers (GitHub, GitLab, Codeberg); constructs tarball URLs and delegates to `TarballHasher`
-- `src/rules/fetcher/git_fetch.rs` — `compute_hash()` for git-based fetchers; builds `GitPrefetchArgs` from fetcher params and delegates to `NixPrefetcher`
+- `src/rules/fetcher/git_fetch.rs` — `compute_hash()` for git-based fetchers; builds `PrefetchArgs` from fetcher params and delegates to `nix_prefetch_git::prefetch`
 - `src/rules/mk_derivation.rs` — `MkDerivationRule` handles `stdenv.mkDerivation rec { version = "..."; src = fetchX { ... }; }` patterns. It resolves source refs with precedence `tag > rev > ref` (pure, `${version}`-interpolated, or multi-variable e.g. `${pname}-${version}`), derives updates from that source ref when possible, propagates to `version`, and refreshes `hash`/`sha256` when ref/effective ref changes or hash is empty. Fetcher attributes may reference `pname` and other pure string attributes from the `mkDerivation` attrset via bare idents (e.g. `repo = pname`) or string interpolation (e.g. `owner = "${pname}-org"`) when the attrset is `rec` or lambda-wrapped; these are resolved into concrete values for URL construction and hash computation.
 - `src/rules/flake_input.rs` — the main rule; parses flake input URLs (github:, gitlab:, sourcehut:, git+https/ssh/file) and detects version updates via `git ls-remote`
 - `src/rules/traits.rs` — `UpdateRule` trait (with `matches` node-type filter and `check` per-node processing), `Update` struct (carries `TextRange` for in-place editing), `RuleRegistry` (single AST traversal dispatching each node to matching rules)
 - `src/utils/version.rs` — version comparison (`VersionDetector`); `prefix()` extracts non-numeric prefix; `latest_matching()` filters candidates by prefix shape
 - `src/utils/fetch.rs` — `GitFetcher` wraps `git ls-remote`; `get_latest_tag_matching()` accepts current version for shape-aware tag selection
-- `src/utils/nar.rs` — NAR serialization + SHA-256 hashing; `hash_path()` produces `NarHash` with SRI, nix-base32, and hex formats
-- `src/utils/tarball.rs` — `TarballHasher` downloads + unpacks tarballs, then NAR-hashes the result
-- `src/utils/prefetch.rs` — `NixPrefetcher` wraps `nix-prefetch-git` (fallback for fetchers not yet supported by pure Rust hashing)
+- `src/utils/tarball.rs` — `TarballHasher` downloads + unpacks tarballs, then NAR-hashes the result via `nix_prefetch_git::nar::hash_path`
 
 ## Key design decisions
 
@@ -59,10 +59,10 @@ Single-crate Rust project. Edition 2024 (requires Rust ≥ 1.85).
 - Inline `?ref=` in URLs is supported (e.g., `github:owner/repo?ref=v1.0`). The ref is extracted from the URL and compared as a version; on update, the entire URL string is replaced.
 - `ref` vs `rev` disambiguation in branch following: if `rev` key exists → update `rev`; if `ref` key exists and the call is `builtins.fetchGit` → update `ref`; otherwise default to `rev`. Documented in `handle_branch_following` comments in `src/rules/fetcher/mod.rs`.
 - The `tag` attribute is supported as a first-class update target: `tag` takes priority over `rev` in `handle_version_update`. When both `tag` and `rev` are present, `tag` is updated.
-- Hash prefetching uses a dispatch strategy via `HashStrategy`: `Tarball` (GitHub/GitLab/Codeberg) uses pure Rust NAR hashing via `TarballHasher` + `hash_path()`; `Git` uses `nix-prefetch-git` via `NixPrefetcher`; `None` skips hashing (builtins.fetchGit).
+- Hash prefetching uses a dispatch strategy via `HashStrategy`: `Tarball` (GitHub/GitLab/Codeberg) uses pure Rust NAR hashing via `TarballHasher` + `hash_path()`; `Git` uses the built-in `nix-prefetch-git` crate; `None` skips hashing (builtins.fetchGit). No external `nix-prefetch-git` binary is required at runtime.
 - Empty hash filling: when `hash` or `sha256` is an empty string, the fetcher attempts to compute and fill the hash, even for pinned calls. `# pin` only pins the version — it does not prevent empty hash filling. Non-empty hashes on pinned calls are left untouched.
 - `MkDerivationRule` uses source-ref precedence `tag > rev > ref` and can operate on version refs, commit-hash refs, empty refs, and `${version}`-interpolated refs (in `rec` attrsets). It may update `version` alone (interpolated ref), `version` + source ref, and/or hash fields depending on what changed. Fetcher attributes may reference `pname` and other pure string attributes from the `mkDerivation` attrset via bare idents (e.g. `repo = pname`) or string interpolation (e.g. `owner = "${pname}-org"`) when the attrset is `rec` or lambda-wrapped; these are resolved into concrete values for URL construction and hash computation. Multi-variable source refs like `rev = "${pname}-${version}"` are supported via `interpolated_var_affixes()`.
-- `GitPrefetchArgs` maps fetcher attributes to `nix-prefetch-git` flags: `fetchSubmodules`/`submodules` → `--fetch-submodules`, `deepClone` → `--deepClone`, `leaveDotGit` → `--leave-dotGit`, `fetchLFS` → `--fetch-lfs`, `branchName` → `--branch-name`, `rootDir` → `--root-dir`, `sparseCheckout` (list) → `--sparse-checkout` per entry. `--no-add-path` is always passed.
+- Fetcher attributes map to `nix_prefetch_git::PrefetchArgs` fields: `fetchSubmodules`/`submodules` → `fetch_submodules`, `deepClone` → `deep_clone`, `leaveDotGit` → `leave_dot_git`, `fetchLFS` → `fetch_lfs`, `branchName` → `branch_name`, `rootDir` → `root_dir`, `sparseCheckout` (list) → `sparse_checkout`.
 - Version shape matching: `VersionDetector::latest_matching()` filters candidate tags to those sharing the same non-numeric prefix as the current version. This prevents cross-shape updates like `v2.41 → 2.6`. The prefix is extracted by `VersionDetector::prefix()` (everything before the first digit).
 - Snapshot test redaction: test `.nix` files in `tests/snapshot/data/` support a `# redact: field1 field2 ...` directive on the first line. Listed fields are omitted from the snapshot output. This allows selective redaction of non-deterministic fields like `new` and `range`.
 - Rule registry traversal: `RuleRegistry::check_all` performs a single AST traversal, dispatching each node to matching rules via the `matches` node-type filter. `FlakeInputRule` matches `NODE_ROOT` (needs whole-file scope to correlate `inputs.x.url` with `inputs.x.ref`). `FetcherRule` and `MkDerivationRule` match `NODE_APPLY` (process individual function call nodes — no internal tree traversal needed).

@@ -451,7 +451,7 @@ impl FetcherRule {
             Err(e) => {
                 let git_url = call.kind.git_url(&call.params).unwrap_or_default();
                 eprintln!(
-                    "Warning: could not prefetch hash for {} @ {}: {}",
+                    "Warning: could not prefetch hash for {} @ {}: {:#}",
                     git_url, rev, e
                 );
             }

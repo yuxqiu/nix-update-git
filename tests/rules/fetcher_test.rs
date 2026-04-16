@@ -485,19 +485,8 @@ fn test_fetcher_pkgs_dotted_name() {
         .stdout(predicates::str::contains("fetchgit.rev"));
 }
 
-fn nix_prefetch_git_is_available() -> bool {
-    Command::new("nix-prefetch-git")
-        .arg("--version")
-        .output()
-        .is_ok_and(|out| out.status.success())
-}
-
 #[test]
 fn test_fetcher_empty_hash_filled_on_version_update() {
-    if !nix_prefetch_git_is_available() {
-        return;
-    }
-
     let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
 
     let nix_content = format!(
@@ -525,10 +514,6 @@ fn test_fetcher_empty_hash_filled_on_version_update() {
 
 #[test]
 fn test_fetcher_pinned_empty_hash_attempted() {
-    if !nix_prefetch_git_is_available() {
-        return;
-    }
-
     let repo = TestRepo::new(&["v1.0.0"]);
     let sha = repo.head_sha();
 

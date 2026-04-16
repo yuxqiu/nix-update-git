@@ -594,17 +594,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix-prefetch-git"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "nix-base32",
+ "nix-nar",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
 name = "nix-update-git"
 version = "0.4.1"
 dependencies = [
  "anyhow",
  "assert_cmd",
- "base64",
  "clap",
  "flate2",
  "insta",
- "nix-base32",
- "nix-nar",
+ "nix-prefetch-git",
  "predicates",
  "rayon",
  "regex",
@@ -612,7 +621,6 @@ dependencies = [
  "rowan",
  "serde",
  "serde_json",
- "sha2",
  "tar",
  "tempfile",
  "ureq",

@@ -7,14 +7,17 @@ This project uses [insta](https://insta.rs/) for snapshot testing. Tests are def
 1. **Add a Nix file** in `tests/snapshot/data/<category>/<test_name>.nix`
 
 2. **Run the test** to generate the snapshot:
+
    ```bash
-   cargo test test_fetcher_snapshots -- --include-ignored -s
+   cargo test --features network-tests test_fetcher_snapshots -- -s
    ```
+
    The `-s` flag updates snapshots in review mode (opens your editor for each snapshot).
 
    Alternatively, use `-u` to update all snapshots unconditionally:
+
    ```bash
-   cargo test test_fetcher_snapshots -- --include-ignored -u
+   cargo test --features network-tests test_fetcher_snapshots -- -u
    ```
 
 3. **Verify the snapshot** was created at `tests/snapshot/snaps/<category>/<test_name>.snap`
@@ -30,7 +33,7 @@ Nix files in `data/` are processed by `test_fetcher_snapshots()` in `tests/snaps
 ## Updating Existing Snapshots
 
 ```bash
-cargo test test_fetcher_snapshots -- --include-ignored -u
+cargo test --features network-tests test_fetcher_snapshots -- -u
 ```
 
 Use `-s` for review mode to inspect each change individually.

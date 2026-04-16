@@ -1,0 +1,18 @@
+---
+source: tests/snapshot/mod.rs
+assertion_line: 120
+expression: output_for_insta
+input_file: tests/snapshot/data/fetchgit_parity/pinned_sparse_checkout.nix
+---
+[
+  {
+    "rule": "fetcher",
+    "field": "fetchgit.hash",
+    "old": "\"\"",
+    "new": "\"sha256-K/i2cdJLnwdVhXsoP04Y0CqGCYmBCN7f4zYPLfTwP4A=\"",
+    "range": [
+      729,
+      731
+    ]
+  }
+]

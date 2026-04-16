@@ -1,0 +1,18 @@
+---
+source: tests/snapshot/mod.rs
+assertion_line: 120
+expression: output_for_insta
+input_file: tests/snapshot/data/fetchgit_parity/pinned_submodules.nix
+---
+[
+  {
+    "rule": "fetcher",
+    "field": "fetchgit.hash",
+    "old": "\"\"",
+    "new": "\"sha256-byTyWAUSQmXSqoS6DLkdtfJyoxsrd1K55a5LiwAwaPA=\"",
+    "range": [
+      581,
+      583
+    ]
+  }
+]

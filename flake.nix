@@ -29,7 +29,6 @@
             let
               runtimeDeps = with pkgs; [
                 git
-                nix-prefetch-git
               ];
             in
             pkgs.rustPlatform.buildRustPackage {
@@ -43,7 +42,6 @@
               nativeBuildInputs = with pkgs; [
                 makeWrapper
                 git
-                nix-prefetch-git
               ];
 
               postInstall = ''
@@ -77,7 +75,6 @@
               rust-analyzer
               cargo-watch
               git
-              nix-prefetch-git
             ];
           };
         }

@@ -1,0 +1,15 @@
+[package]
+name = "nix-prefetch-git"
+version = "0.1.0"
+edition = "2024"
+description = "Pure-Rust reimplementation of nix-prefetch-git for computing NAR hashes of git checkouts"
+license = "MIT"
+repository = "https://github.com/yuxqiu/nix-update-git"
+homepage = "https://github.com/yuxqiu/nix-update-git"
+
+[dependencies]
+base64 = { workspace = true }
+nix-base32 = { workspace = true }
+nix-nar = { workspace = true }
+sha2 = { workspace = true }
+tempfile = { workspace = true }

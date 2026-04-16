@@ -1,0 +1,18 @@
+---
+source: tests/snapshot/mod.rs
+assertion_line: 120
+expression: output_for_insta
+input_file: tests/snapshot/data/fetchgit_parity/pinned_tag_ref.nix
+---
+[
+  {
+    "rule": "fetcher",
+    "field": "fetchgit.hash",
+    "old": "\"\"",
+    "new": "\"sha256-DDga3Xty/T2EoohP8rj+IX0oxbz8//INIujb+VhwScs=\"",
+    "range": [
+      469,
+      471
+    ]
+  }
+]

@@ -3,13 +3,6 @@ use assert_cmd::Command;
 use std::fs;
 use tempfile::tempdir;
 
-fn nix_prefetch_git_is_available() -> bool {
-    Command::new("nix-prefetch-git")
-        .arg("--version")
-        .output()
-        .is_ok_and(|out| out.status.success())
-}
-
 #[test]
 fn test_mk_derivation_detects_version_and_rev_update() {
     let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
@@ -266,10 +259,6 @@ fn test_mk_derivation_version_not_version_string_skips() {
 
 #[test]
 fn test_mk_derivation_hash_update() {
-    if !nix_prefetch_git_is_available() {
-        return;
-    }
-
     let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
 
     let nix_content = format!(
@@ -302,10 +291,6 @@ fn test_mk_derivation_hash_update() {
 
 #[test]
 fn test_mk_derivation_interpolated_rev_updates_version_and_hash_only() {
-    if !nix_prefetch_git_is_available() {
-        return;
-    }
-
     let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
 
     let nix_content = format!(
@@ -349,10 +334,6 @@ fn test_mk_derivation_interpolated_rev_updates_version_and_hash_only() {
 
 #[test]
 fn test_mk_derivation_populates_empty_rev_and_hash_from_version() {
-    if !nix_prefetch_git_is_available() {
-        return;
-    }
-
     let repo = TestRepo::new(&["v1.0.0"]);
 
     let nix_content = format!(
@@ -396,10 +377,6 @@ fn test_mk_derivation_populates_empty_rev_and_hash_from_version() {
 
 #[test]
 fn test_mk_derivation_empty_rev_rehashes_existing_hash() {
-    if !nix_prefetch_git_is_available() {
-        return;
-    }
-
     let repo = TestRepo::new(&["v1.0.0"]);
 
     let nix_content = format!(
@@ -440,10 +417,6 @@ fn test_mk_derivation_empty_rev_rehashes_existing_hash() {
 
 #[test]
 fn test_mk_derivation_empty_hash_with_matching_rev_updates_hash_only() {
-    if !nix_prefetch_git_is_available() {
-        return;
-    }
-
     let repo = TestRepo::new(&["v1.0.0"]);
 
     let nix_content = format!(
@@ -575,10 +548,6 @@ fn test_mk_derivation_lambda_wrapped_detects_update() {
 
 #[test]
 fn test_mk_derivation_lambda_wrapped_empty_rev_and_hash() {
-    if !nix_prefetch_git_is_available() {
-        return;
-    }
-
     let repo = TestRepo::new(&["v1.0.0"]);
 
     let nix_content = format!(
@@ -617,10 +586,6 @@ fn test_mk_derivation_lambda_wrapped_empty_rev_and_hash() {
 
 #[test]
 fn test_mk_derivation_lambda_wrapped_interpolated_rev() {
-    if !nix_prefetch_git_is_available() {
-        return;
-    }
-
     let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
 
     let nix_content = format!(
@@ -705,10 +670,6 @@ fn test_fetcher_excluded_from_lambda_wrapped_mk_derivation() {
 
 #[test]
 fn test_mk_derivation_rec_lambda_dual_interpolation_bare_version() {
-    if !nix_prefetch_git_is_available() {
-        return;
-    }
-
     let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
 
     // Both rec and finalAttrs are present; ${version} is valid
@@ -755,10 +716,6 @@ fn test_mk_derivation_rec_lambda_dual_interpolation_bare_version() {
 
 #[test]
 fn test_mk_derivation_rec_lambda_dual_interpolation_final_attrs_version() {
-    if !nix_prefetch_git_is_available() {
-        return;
-    }
-
     let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
 
     // Both rec and finalAttrs are present; ${finalAttrs.version} is valid
@@ -837,17 +794,13 @@ fn test_mk_derivation_rec_and_final_attrs_together() {
 
 #[test]
 fn test_mk_derivation_rec_and_final_attrs_interpolated_version() {
-    if !nix_prefetch_git_is_available() {
-        return;
-    }
-
     let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
 
     let nix_content = format!(
         r#"{{
   foo = stdenv.mkDerivation (finalAttrs: rec {{
     name = "foo-${{version}}";
-    version = "v1.0.0";
+    version = "1.0.0";
     src = fetchgit {{
       url = "{}";
       rev = "v${{version}}";
@@ -886,17 +839,13 @@ fn test_mk_derivation_rec_and_final_attrs_interpolated_version() {
 
 #[test]
 fn test_mk_derivation_rec_and_final_attrs_interpolated_final_attrs_version() {
-    if !nix_prefetch_git_is_available() {
-        return;
-    }
-
     let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
 
     let nix_content = format!(
         r#"{{
   foo = stdenv.mkDerivation (finalAttrs: rec {{
     name = "foo-${{version}}";
-    version = "v1.0.0";
+    version = "1.0.0";
     src = fetchgit {{
       url = "{}";
       rev = "v${{finalAttrs.version}}";
@@ -935,10 +884,6 @@ fn test_mk_derivation_rec_and_final_attrs_interpolated_final_attrs_version() {
 
 #[test]
 fn test_mk_derivation_pname_bare_ident_in_url() {
-    if !nix_prefetch_git_is_available() {
-        return;
-    }
-
     let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
 
     // pname is used as a bare ident for the fetcher url
@@ -946,7 +891,7 @@ fn test_mk_derivation_pname_bare_ident_in_url() {
         r#"{{
   foo = stdenv.mkDerivation rec {{
     pname = "{path}";
-    version = "v1.0.0";
+    version = "1.0.0";
     src = fetchgit {{
       url = pname;
       rev = "v${{version}}";
@@ -985,10 +930,6 @@ fn test_mk_derivation_pname_bare_ident_in_url() {
 
 #[test]
 fn test_mk_derivation_pname_interpolation_in_url() {
-    if !nix_prefetch_git_is_available() {
-        return;
-    }
-
     let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
 
     // pname is used via string interpolation in the fetcher url
@@ -996,7 +937,7 @@ fn test_mk_derivation_pname_interpolation_in_url() {
         r#"{{
   foo = stdenv.mkDerivation rec {{
     pname = "{path}";
-    version = "v1.0.0";
+    version = "1.0.0";
     src = fetchgit {{
       url = "${{pname}}";
       rev = "v${{version}}";
@@ -1035,10 +976,6 @@ fn test_mk_derivation_pname_interpolation_in_url() {
 
 #[test]
 fn test_mk_derivation_pname_interpolation_lambda_wrapped() {
-    if !nix_prefetch_git_is_available() {
-        return;
-    }
-
     let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
 
     // pname used via ${finalAttrs.pname} in lambda-wrapped mkDerivation
@@ -1046,7 +983,7 @@ fn test_mk_derivation_pname_interpolation_lambda_wrapped() {
         r#"{{
   foo = stdenv.mkDerivation (finalAttrs: {{
     pname = "{path}";
-    version = "v1.0.0";
+    version = "1.0.0";
     src = fetchgit {{
       url = "${{finalAttrs.pname}}";
       rev = "v${{finalAttrs.version}}";
@@ -1085,10 +1022,6 @@ fn test_mk_derivation_pname_interpolation_lambda_wrapped() {
 
 #[test]
 fn test_mk_derivation_multi_var_interpolated_rev() {
-    if !nix_prefetch_git_is_available() {
-        return;
-    }
-
     let repo = TestRepo::new(&["foo-v1.0.0", "foo-v2.0.0"]);
 
     // rev uses both pname and version: rev = "${pname}-${version}"

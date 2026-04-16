@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-
-use crate::utils::{GitPrefetchArgs, NarHash, NixPrefetcher};
+use nix_prefetch_git::{NarHash, PrefetchArgs, prefetch};
 
 use super::kind::FetcherKind;
 
@@ -27,8 +26,12 @@ pub fn compute_hash(
         "fetchSubmodules"
     };
 
-    let git_args = GitPrefetchArgs {
-        fetch_submodules: bool_param(params, submodules_key),
+    let fetch_submodules = bool_param(params, submodules_key);
+
+    let args = PrefetchArgs {
+        url: git_url.clone(),
+        rev: rev.to_string(),
+        fetch_submodules,
         deep_clone: bool_param(params, "deepClone"),
         leave_dot_git: bool_param(params, "leaveDotGit"),
         fetch_lfs: bool_param(params, "fetchLFS"),
@@ -37,9 +40,21 @@ pub fn compute_hash(
         sparse_checkout: sparse_checkout.to_vec(),
     };
 
-    let prefetch = NixPrefetcher::prefetch_git(&git_url, rev, &git_args)?;
+    let result = prefetch(&args).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to prefetch git repository {} @ {}{}: {e}",
+            git_url,
+            rev,
+            if fetch_submodules {
+                " (with submodules)"
+            } else {
+                ""
+            }
+        )
+    })?;
+
     Ok(NarHash {
-        sri: prefetch.sri_hash,
-        nix32: prefetch.sha256_nix,
+        sri: result.sri_hash,
+        nix32: result.sha256_nix,
     })
 }

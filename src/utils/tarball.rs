@@ -4,8 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
-
-use super::nar::{NarHash, hash_path};
+use nix_prefetch_git::{NarHash, nar::hash_path};
 
 pub struct TarballHasher;
 
@@ -15,7 +14,7 @@ impl TarballHasher {
         let dir = tempfile::tempdir().context("Failed to create temp directory")?;
         Self::unpack_tarball(&tarball_bytes, dir.path())?;
         let content_dir = Self::find_single_subdir(dir.path())?;
-        hash_path(&content_dir)
+        hash_path(&content_dir).map_err(|e| anyhow::anyhow!("{e}"))
     }
 
     fn download(url: &str) -> Result<Vec<u8>> {

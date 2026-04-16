@@ -33,7 +33,7 @@ inputs.nix-update-git.url = "github:yuxqiu/nix-update-git";
 cargo install --git https://github.com/yuxqiu/nix-update-git
 ```
 
-Requires `git` on `$PATH` at runtime. `nix-prefetch-git` is optional — needed only for `fetchgit` and fetchers with `fetchSubmodules = true`.
+Requires `git` on `$PATH` at runtime.
 
 ## Usage
 
@@ -234,6 +234,8 @@ src = fetchFromGitHub { # pin
 ## Acknowledgments
 
 This project was inspired by [update-nix-fetchgit](https://github.com/expipiplus1/update-nix-fetchgit), which provides similar functionality for updating fetcher calls.
+
+The built-in `nix-prefetch-git` crate (`nix-prefetch-git/`) is a pure-Rust reimplementation of the [shell-based `nix-prefetch-git`](https://github.com/NixOS/nixpkgs/blob/master/pkgs/build-support/fetchgit/nix-prefetch-git) from nixpkgs. It replicates the same git clone, deterministic cleanup, and NAR hashing logic, removing the runtime dependency on the external `nix-prefetch-git`, `nix-hash`, and `nix-store` binaries.
 
 ## License
 
