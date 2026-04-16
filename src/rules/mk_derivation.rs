@@ -17,6 +17,12 @@ use crate::utils::{GitFetcher, NarHash, VersionDetector};
 //    fall back to mkDerivation.version for empty/hash refs.
 // 3) When source ref changes (or hash is empty), recompute hash/sha256 using the
 //    resolved fetch revision. For interpolated refs, only version is rewritten.
+//
+// Two attrset wrapping patterns are supported:
+//   mkDerivation rec { version = ...; src = fetchX { ... }; }
+//   mkDerivation (finalAttrs: { version = ...; src = fetchX { ... }; })
+// In both cases, source refs like `rev = "v${version}"` or
+// `rev = "v${finalAttrs.version}"` can be interpolated.
 
 struct MkDerivationCall {
     version_value: String,
@@ -34,7 +40,14 @@ struct MkDerivationCall {
 enum SourceRefValue {
     Missing,
     Pure(String),
-    InterpolatedFromVersion { template_node: NixNode },
+    InterpolatedFromVersion {
+        template_node: NixNode,
+        /// The variable name used for interpolation resolution, e.g.
+        /// "version" for `${version}` or "finalAttrs.version" for
+        /// `${finalAttrs.version}`. Determined by probing the template
+        /// node against the available version variable names.
+        version_var: String,
+    },
 }
 
 #[derive(Default)]
@@ -48,10 +61,9 @@ impl MkDerivationRule {
             return None;
         }
 
-        let arg = node.apply_argument()?;
-        if arg.kind() != rnix::SyntaxKind::NODE_ATTR_SET {
-            return None;
-        }
+        // Handles both mkDerivation rec { ... } and
+        // mkDerivation (finalAttrs: { ... })
+        let arg = node.apply_argument_attrset()?;
 
         let version_entry = arg.find_attr_by_key("version")?;
         let version_node = version_entry.attr_value()?;
@@ -62,7 +74,28 @@ impl MkDerivationRule {
         if !VersionDetector::is_version(&version_content) {
             return None;
         }
+
         let is_recursive = arg.text().trim_start().starts_with("rec");
+
+        // For lambda-wrapped patterns like mkDerivation (finalAttrs: { ... }),
+        // the lambda parameter provides self-reference via ${finalAttrs.version}.
+        // When both rec and a lambda param are present (e.g., mkDerivation (finalAttrs: rec { ... })),
+        // both ${version} and ${finalAttrs.version} are valid interpolations.
+        let lambda_param = node.apply_lambda_param();
+
+        // Collect all possible version variable names for interpolation.
+        // rec { } allows bare ${version}; lambda (x:) allows ${x.version}.
+        // When both are present, both forms are valid.
+        let version_vars: Vec<String> = {
+            let mut vars = Vec::new();
+            if is_recursive {
+                vars.push("version".to_string());
+            }
+            if let Some(ref param) = lambda_param {
+                vars.push(format!("{}.version", param));
+            }
+            vars
+        };
 
         let src_entry = arg.find_attr_by_key("src")?;
         let src_value = src_entry.attr_value()?;
@@ -78,12 +111,20 @@ impl MkDerivationRule {
             return None;
         }
 
+        // Build interpolation spec: allow tag/rev/ref to be interpolated
+        // with the version variable(s) when self-reference is available.
         let mut spec = InterpolationSpec::none();
-        if is_recursive {
-            let version_vars = HashMap::from([("version".to_string(), version_content.clone())]);
-            spec.allow("tag", version_vars.clone());
-            spec.allow("rev", version_vars.clone());
-            spec.allow("ref", version_vars);
+        if !version_vars.is_empty() {
+            // Merge all version variable mappings into one map per field,
+            // so that both ${version} and ${finalAttrs.version} resolve
+            // correctly when both rec and lambda are present.
+            let vars: HashMap<String, String> = version_vars
+                .iter()
+                .map(|v| (v.clone(), version_content.clone()))
+                .collect();
+            spec.allow("tag", vars.clone());
+            spec.allow("rev", vars.clone());
+            spec.allow("ref", vars);
         }
 
         let mut attrs = parse_fetcher_attrset(&src_arg, &spec);
@@ -116,7 +157,18 @@ impl MkDerivationRule {
             if let Some(value) = attrs.params.get(key) {
                 SourceRefValue::Pure(value.clone())
             } else if let Some(template_node) = attrs.interpolated.remove(key) {
-                SourceRefValue::InterpolatedFromVersion { template_node }
+                // Determine which version variable the template actually uses
+                // by probing each candidate. Falls back to the first candidate
+                // (which should always match since the spec already validated it).
+                let detected_var = version_vars
+                    .iter()
+                    .find(|v| template_node.interpolated_single_var_affixes(v).is_some())
+                    .cloned()
+                    .unwrap_or_else(|| version_vars.first().cloned().unwrap_or_default());
+                SourceRefValue::InterpolatedFromVersion {
+                    template_node,
+                    version_var: detected_var,
+                }
             } else {
                 SourceRefValue::Missing
             }
@@ -165,8 +217,9 @@ impl MkDerivationRule {
     fn extract_version_from_interpolated_ref(
         template_node: &NixNode,
         resolved_ref: &str,
+        version_var: &str,
     ) -> Option<String> {
-        let (prefix, suffix) = template_node.interpolated_single_var_affixes("version")?;
+        let (prefix, suffix) = template_node.interpolated_single_var_affixes(version_var)?;
         if !resolved_ref.starts_with(&prefix) || !resolved_ref.ends_with(&suffix) {
             return None;
         }
@@ -230,16 +283,22 @@ impl MkDerivationRule {
                     new_source_ref_text = Some(call.version_value.clone());
                 }
             }
-            SourceRefValue::InterpolatedFromVersion { template_node } => {
+            SourceRefValue::InterpolatedFromVersion {
+                template_node,
+                version_var,
+            } => {
                 let mut vars = HashMap::new();
-                vars.insert("version".to_string(), call.version_value.clone());
+                vars.insert(version_var.clone(), call.version_value.clone());
                 if let Some(resolved_ref) = template_node.interpolated_string_content(&vars)
                     && let Some(latest_ref) =
                         GitFetcher::get_latest_tag_matching(&git_url, Some(&resolved_ref))?
                     && VersionDetector::compare(&resolved_ref, &latest_ref)
                         == std::cmp::Ordering::Less
-                    && let Some(candidate_version) =
-                        Self::extract_version_from_interpolated_ref(template_node, &latest_ref)
+                    && let Some(candidate_version) = Self::extract_version_from_interpolated_ref(
+                        template_node,
+                        &latest_ref,
+                        version_var,
+                    )
                     && VersionDetector::is_version(&candidate_version)
                     && VersionDetector::compare(&call.version_value, &candidate_version)
                         == std::cmp::Ordering::Less
@@ -294,9 +353,12 @@ impl MkDerivationRule {
                     SourceRefValue::Pure(reference) => {
                         resolve_ref_for_prefetch(&git_url, reference)
                     }
-                    SourceRefValue::InterpolatedFromVersion { template_node } => {
+                    SourceRefValue::InterpolatedFromVersion {
+                        template_node,
+                        version_var,
+                    } => {
                         let mut vars = HashMap::new();
-                        vars.insert("version".to_string(), target_version.clone());
+                        vars.insert(version_var.clone(), target_version.clone());
                         template_node
                             .interpolated_string_content(&vars)
                             .and_then(|resolved| resolve_ref_for_prefetch(&git_url, &resolved))

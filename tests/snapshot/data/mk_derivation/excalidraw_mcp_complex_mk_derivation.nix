@@ -1,3 +1,4 @@
+# redact: new
 # Modified from petertriho/nix-config/pkgs/excalidraw-mcp/default.nix
 {
   lib,

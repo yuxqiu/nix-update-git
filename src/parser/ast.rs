@@ -347,6 +347,71 @@ impl NixNode {
             .find(|child| child.kind() == rnix::SyntaxKind::NODE_ATTR_SET)
     }
 
+    /// Find the argument attrset of a function application, unwrapping
+    /// parenthesized lambda patterns.
+    ///
+    /// For `f { ... }` this returns the direct `NODE_ATTR_SET` child
+    /// (same as `apply_argument`). For `f (x: { ... })` it unwraps
+    /// the `NODE_PAREN` → `NODE_LAMBDA` → `NODE_ATTR_SET` layers.
+    pub fn apply_argument_attrset(&self) -> Option<NixNode> {
+        if self.kind() != rnix::SyntaxKind::NODE_APPLY {
+            return None;
+        }
+
+        // Try direct attrset child: f { ... }
+        if let Some(attr_set) = self.apply_argument() {
+            return Some(attr_set);
+        }
+
+        // Try parenthesized lambda: f (x: { ... })
+        let paren = self
+            .children()
+            .into_iter()
+            .find(|child| child.kind() == rnix::SyntaxKind::NODE_PAREN)?;
+
+        let lambda = paren
+            .children()
+            .into_iter()
+            .find(|child| child.kind() == rnix::SyntaxKind::NODE_LAMBDA)?;
+
+        lambda
+            .children()
+            .into_iter()
+            .find(|child| child.kind() == rnix::SyntaxKind::NODE_ATTR_SET)
+    }
+
+    /// If the argument to this function application is a parenthesized
+    /// lambda `(param: { ... })`, return the lambda parameter name.
+    /// Returns `None` if the argument is a direct attrset or if the
+    /// pattern doesn't match.
+    pub fn apply_lambda_param(&self) -> Option<String> {
+        if self.kind() != rnix::SyntaxKind::NODE_APPLY {
+            return None;
+        }
+
+        // Only applies when there's no direct attrset child
+        if self.apply_argument().is_some() {
+            return None;
+        }
+
+        let paren = self
+            .children()
+            .into_iter()
+            .find(|child| child.kind() == rnix::SyntaxKind::NODE_PAREN)?;
+
+        let lambda = paren
+            .children()
+            .into_iter()
+            .find(|child| child.kind() == rnix::SyntaxKind::NODE_LAMBDA)?;
+
+        let param = lambda
+            .children()
+            .into_iter()
+            .find(|child| child.kind() == rnix::SyntaxKind::NODE_IDENT_PARAM)?;
+
+        Some(param.text_trimmed())
+    }
+
     pub fn find_bool_value(&self, key: &str) -> Option<bool> {
         let entry = self.find_attr_by_key(key)?;
         let value = entry.attr_value()?;

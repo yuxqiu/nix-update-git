@@ -464,10 +464,26 @@ impl FetcherRule {
             return false;
         }
 
-        let mk_derivation_apply = match attr_set.parent() {
+        // Walk up from the attrset through lambda/paren layers to find
+        // the mkDerivation call. Handles both:
+        //   mkDerivation { src = fetch ...; }     (direct attrset)
+        //   mkDerivation (finalAttrs: { src = fetch ...; })  (lambda-wrapped)
+        let mut mk_derivation_apply = match attr_set.parent() {
             Some(p) => p,
             None => return false,
         };
+        if mk_derivation_apply.kind() == rnix::SyntaxKind::NODE_LAMBDA {
+            mk_derivation_apply = match mk_derivation_apply.parent() {
+                Some(p) => p,
+                None => return false,
+            };
+        }
+        if mk_derivation_apply.kind() == rnix::SyntaxKind::NODE_PAREN {
+            mk_derivation_apply = match mk_derivation_apply.parent() {
+                Some(p) => p,
+                None => return false,
+            };
+        }
         if mk_derivation_apply.kind() != rnix::SyntaxKind::NODE_APPLY {
             return false;
         }
@@ -781,6 +797,57 @@ stdenv.mkDerivation rec {
     }
 
     #[test]
+    fn test_parse_fetcher_attrset_dual_interpolation_vars() {
+        // When both "version" and "finalAttrs.version" are allowed,
+        // rev = "v${version}" should resolve via the "version" binding.
+        let content = r#"{ rev = "v${version}"; owner = "test"; }"#;
+        let root = parse_root(content);
+        let attr_set = root
+            .traverse()
+            .find(|n| n.kind() == rnix::SyntaxKind::NODE_ATTR_SET)
+            .unwrap();
+        let mut spec = super::InterpolationSpec::none();
+        spec.allow(
+            "rev",
+            HashMap::from([
+                ("version".to_string(), "1.0".to_string()),
+                ("finalAttrs.version".to_string(), "1.0".to_string()),
+            ]),
+        );
+        let attrs = super::parse_fetcher_attrset(&attr_set, &spec);
+        assert!(attrs.interpolated.contains_key("rev"));
+        assert!(attrs.interpolated_unresolved.is_empty());
+        assert!(!attrs.params.contains_key("rev"));
+        assert_eq!(attrs.params.get("owner"), Some(&"test".to_string()));
+    }
+
+    #[test]
+    fn test_parse_fetcher_attrset_dual_interpolation_vars_dotted() {
+        // When both "version" and "finalAttrs.version" are allowed,
+        // rev = "v${finalAttrs.version}" should resolve via the
+        // "finalAttrs.version" binding.
+        let content = r#"{ rev = "v${finalAttrs.version}"; owner = "test"; }"#;
+        let root = parse_root(content);
+        let attr_set = root
+            .traverse()
+            .find(|n| n.kind() == rnix::SyntaxKind::NODE_ATTR_SET)
+            .unwrap();
+        let mut spec = super::InterpolationSpec::none();
+        spec.allow(
+            "rev",
+            HashMap::from([
+                ("version".to_string(), "1.0".to_string()),
+                ("finalAttrs.version".to_string(), "1.0".to_string()),
+            ]),
+        );
+        let attrs = super::parse_fetcher_attrset(&attr_set, &spec);
+        assert!(attrs.interpolated.contains_key("rev"));
+        assert!(attrs.interpolated_unresolved.is_empty());
+        assert!(!attrs.params.contains_key("rev"));
+        assert_eq!(attrs.params.get("owner"), Some(&"test".to_string()));
+    }
+
+    #[test]
     fn test_fetcher_skips_interpolated_operational_key() {
         let content = r#"
 {
@@ -819,5 +886,42 @@ stdenv.mkDerivation rec {
         let call = super::FetcherRule::try_extract_call(&fetcher_node);
         assert!(call.is_some());
         assert_eq!(call.unwrap().params.get("rev"), Some(&"v1.0.0".to_string()));
+    }
+
+    #[test]
+    fn test_is_src_of_lambda_wrapped_mk_derivation_returns_true() {
+        let content = r#"
+stdenv.mkDerivation (finalAttrs: {
+  version = "v1.0.0";
+  src = fetchgit {
+    url = "https://example.com/repo";
+    rev = "0000000000000000000000000000000000000000";
+    sha256 = "0nmyp5yrzl9dbq85wyiimsj9fklb8637a1936nw7zzvlnzkgh28n";
+  };
+})
+"#;
+        let root = parse_root(content);
+        let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
+        assert!(super::FetcherRule::is_src_of_active_mk_derivation(
+            &fetcher_node
+        ));
+    }
+
+    #[test]
+    fn test_matches_excludes_src_in_lambda_wrapped_mk_derivation() {
+        let content = r#"
+stdenv.mkDerivation (finalAttrs: {
+  version = "v1.0.0";
+  src = fetchgit {
+    url = "https://example.com/repo";
+    rev = "0000000000000000000000000000000000000000";
+    sha256 = "0nmyp5yrzl9dbq85wyiimsj9fklb8637a1936nw7zzvlnzkgh28n";
+  };
+})
+"#;
+        let root = parse_root(content);
+        let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
+        let rule = super::FetcherRule;
+        assert!(!rule.matches(&fetcher_node));
     }
 }

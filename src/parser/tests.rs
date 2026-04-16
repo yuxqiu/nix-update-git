@@ -258,6 +258,67 @@ fn test_apply_function_name_nested() {
 }
 
 #[test]
+fn test_apply_argument_attrset_direct() {
+    let content = "{ x = f { foo = \"bar\"; }; }";
+    let root = parse(content);
+    let apply = root
+        .traverse()
+        .find(|n| n.kind() == rnix::SyntaxKind::NODE_APPLY)
+        .unwrap();
+    let arg = apply.apply_argument_attrset().unwrap();
+    assert_eq!(arg.kind(), rnix::SyntaxKind::NODE_ATTR_SET);
+    assert_eq!(arg.find_string_value("foo"), Some("bar".to_string()));
+}
+
+#[test]
+fn test_apply_argument_attrset_lambda_wrapped() {
+    let content = "{ x = stdenv.mkDerivation (finalAttrs: { version = \"1.0\"; }); }";
+    let root = parse(content);
+    let apply = root
+        .traverse()
+        .find(|n| {
+            n.kind() == rnix::SyntaxKind::NODE_APPLY
+                && n.apply_function_name().as_deref() == Some("stdenv.mkDerivation")
+        })
+        .unwrap();
+    // apply_argument returns None because there's no direct ATTR_SET child
+    assert!(apply.apply_argument().is_none());
+    // apply_argument_attrset unwraps the paren/lambda to find the attrset
+    let arg = apply.apply_argument_attrset().unwrap();
+    assert_eq!(arg.kind(), rnix::SyntaxKind::NODE_ATTR_SET);
+    assert_eq!(arg.find_string_value("version"), Some("1.0".to_string()));
+}
+
+#[test]
+fn test_apply_lambda_param_present() {
+    let content = "{ x = stdenv.mkDerivation (finalAttrs: { version = \"1.0\"; }); }";
+    let root = parse(content);
+    let apply = root
+        .traverse()
+        .find(|n| {
+            n.kind() == rnix::SyntaxKind::NODE_APPLY
+                && n.apply_function_name().as_deref() == Some("stdenv.mkDerivation")
+        })
+        .unwrap();
+    assert_eq!(apply.apply_lambda_param(), Some("finalAttrs".to_string()));
+}
+
+#[test]
+fn test_apply_lambda_param_absent_direct_attrset() {
+    let content = "{ x = stdenv.mkDerivation rec { version = \"1.0\"; }; }";
+    let root = parse(content);
+    let apply = root
+        .traverse()
+        .find(|n| {
+            n.kind() == rnix::SyntaxKind::NODE_APPLY
+                && n.apply_function_name().as_deref() == Some("stdenv.mkDerivation")
+        })
+        .unwrap();
+    // Direct attrset — no lambda parameter
+    assert!(apply.apply_lambda_param().is_none());
+}
+
+#[test]
 fn test_find_string_value() {
     let content = r#"
 {
