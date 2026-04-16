@@ -97,6 +97,15 @@ pub(crate) struct InterpolationSpec {
     /// E.g., `{"rev": {"version": "1.0.0"}}` means the `rev` field
     /// may use `${version}` interpolation.
     allowed: HashMap<String, HashMap<String, String>>,
+    /// When set, any field may use these variable bindings for
+    /// interpolation. Field-specific `allowed` entries take
+    /// precedence (their variables are merged on top of
+    /// `allow_all_vars`).
+    allow_all_vars: Option<HashMap<String, String>>,
+    /// Ident-name → string-value bindings for resolving bare ident
+    /// values. E.g., `{"pname": "foo"}` resolves `repo = pname;`
+    /// into `repo = "foo"`.
+    ident_vars: HashMap<String, String>,
 }
 
 impl InterpolationSpec {
@@ -104,6 +113,8 @@ impl InterpolationSpec {
     pub(crate) fn none() -> Self {
         Self {
             allowed: HashMap::new(),
+            allow_all_vars: None,
+            ident_vars: HashMap::new(),
         }
     }
 
@@ -113,6 +124,38 @@ impl InterpolationSpec {
     /// before accepting the field.
     pub(crate) fn allow(&mut self, field: &str, vars: HashMap<String, String>) {
         self.allowed.insert(field.to_string(), vars);
+    }
+
+    /// Allow interpolation in **any** field using the given variable
+    /// bindings. Field-specific `allow()` entries are merged on top
+    /// of these defaults, so their variables supplement or override
+    /// the catch-all set.
+    pub(crate) fn allow_all(&mut self, vars: HashMap<String, String>) {
+        self.allow_all_vars = Some(vars);
+    }
+
+    /// Register ident bindings for bare ident resolution.
+    /// When a fetcher attribute value is a bare identifier (e.g.
+    /// `repo = pname`), the parser will look it up here and, if
+    /// found, treat it as a pure string value.
+    pub(crate) fn allow_idents(&mut self, idents: HashMap<String, String>) {
+        self.ident_vars = idents;
+    }
+
+    /// Look up the effective variable bindings for a field.
+    /// Field-specific entries are merged on top of `allow_all_vars`,
+    /// so callers get the union of both.
+    pub(crate) fn vars_for_field(&self, field: &str) -> Option<HashMap<String, String>> {
+        match (&self.allow_all_vars, self.allowed.get(field)) {
+            (None, None) => None,
+            (None, Some(field_vars)) => Some(field_vars.clone()),
+            (Some(default_vars), None) => Some(default_vars.clone()),
+            (Some(default_vars), Some(field_vars)) => {
+                let mut merged = default_vars.clone();
+                merged.extend(field_vars.iter().map(|(k, v)| (k.clone(), v.clone())));
+                Some(merged)
+            }
+        }
     }
 }
 
@@ -171,8 +214,8 @@ pub(crate) fn parse_fetcher_attrset(attr_set: &NixNode, spec: &InterpolationSpec
 
                 if let Some(content) = value.pure_string_content() {
                     params.insert(key, content);
-                } else if let Some(vars) = spec.allowed.get(&key) {
-                    if value.interpolated_string_content(vars).is_some() {
+                } else if let Some(vars) = spec.vars_for_field(&key) {
+                    if value.interpolated_string_content(&vars).is_some() {
                         interpolated.insert(key, value);
                     } else {
                         interpolated_unresolved.push(key);
@@ -184,6 +227,10 @@ pub(crate) fn parse_fetcher_attrset(attr_set: &NixNode, spec: &InterpolationSpec
                 let trimmed = value.text_trimmed();
                 if trimmed == "true" || trimmed == "false" {
                     params.insert(key, trimmed);
+                } else if let Some(resolved) = spec.ident_vars.get(&trimmed) {
+                    // Resolve bare ident references (e.g. `repo = pname`)
+                    // using the ident bindings from the spec.
+                    params.insert(key, resolved.clone());
                 }
             } else if key == "sparseCheckout" && value.kind() == rnix::SyntaxKind::NODE_LIST {
                 for item in value.children() {
@@ -923,5 +970,123 @@ stdenv.mkDerivation (finalAttrs: {
         let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
         let rule = super::FetcherRule;
         assert!(!rule.matches(&fetcher_node));
+    }
+
+    #[test]
+    fn test_interpolation_spec_vars_for_field_merge() {
+        let mut spec = super::InterpolationSpec::none();
+        spec.allow_all(HashMap::from([("pname".to_string(), "foo".to_string())]));
+        spec.allow(
+            "rev",
+            HashMap::from([("version".to_string(), "1.0".to_string())]),
+        );
+        // rev merges allow_all + field-specific
+        let rev_vars = spec.vars_for_field("rev").unwrap();
+        assert_eq!(rev_vars.get("pname"), Some(&"foo".to_string()));
+        assert_eq!(rev_vars.get("version"), Some(&"1.0".to_string()));
+        // owner only gets allow_all
+        let owner_vars = spec.vars_for_field("owner").unwrap();
+        assert_eq!(owner_vars.get("pname"), Some(&"foo".to_string()));
+        assert!(!owner_vars.contains_key("version"));
+        // unknown field gets allow_all
+        let name_vars = spec.vars_for_field("name").unwrap();
+        assert_eq!(name_vars.get("pname"), Some(&"foo".to_string()));
+    }
+
+    #[test]
+    fn test_interpolation_spec_vars_for_field_none() {
+        let spec = super::InterpolationSpec::none();
+        assert!(spec.vars_for_field("rev").is_none());
+    }
+
+    #[test]
+    fn test_interpolation_spec_vars_for_field_only_allow_all() {
+        let mut spec = super::InterpolationSpec::none();
+        spec.allow_all(HashMap::from([("pname".to_string(), "foo".to_string())]));
+        let vars = spec.vars_for_field("owner").unwrap();
+        assert_eq!(vars.get("pname"), Some(&"foo".to_string()));
+    }
+
+    #[test]
+    fn test_interpolation_spec_vars_for_field_only_field_specific() {
+        let mut spec = super::InterpolationSpec::none();
+        spec.allow(
+            "rev",
+            HashMap::from([("version".to_string(), "1.0".to_string())]),
+        );
+        let rev_vars = spec.vars_for_field("rev").unwrap();
+        assert_eq!(rev_vars.get("version"), Some(&"1.0".to_string()));
+        assert!(spec.vars_for_field("owner").is_none());
+    }
+
+    #[test]
+    fn test_parse_fetcher_attrset_ident_resolution() {
+        let content = r#"{ repo = pname; owner = "test-org"; rev = "v1.0.0"; }"#;
+        let root = parse_root(content);
+        let attr_set = root
+            .traverse()
+            .find(|n| n.kind() == rnix::SyntaxKind::NODE_ATTR_SET)
+            .unwrap();
+        let mut spec = super::InterpolationSpec::none();
+        spec.allow_idents(HashMap::from([("pname".to_string(), "my-pkg".to_string())]));
+        let attrs = super::parse_fetcher_attrset(&attr_set, &spec);
+        // bare ident pname should be resolved via ident_vars
+        assert_eq!(attrs.params.get("repo"), Some(&"my-pkg".to_string()));
+        assert_eq!(attrs.params.get("owner"), Some(&"test-org".to_string()));
+        assert_eq!(attrs.params.get("rev"), Some(&"v1.0.0".to_string()));
+    }
+
+    #[test]
+    fn test_parse_fetcher_attrset_ident_not_in_idents_ignored() {
+        let content = r#"{ repo = pname; owner = "test-org"; }"#;
+        let root = parse_root(content);
+        let attr_set = root
+            .traverse()
+            .find(|n| n.kind() == rnix::SyntaxKind::NODE_ATTR_SET)
+            .unwrap();
+        // No ident_vars configured — pname is not resolved
+        let spec = super::InterpolationSpec::none();
+        let attrs = super::parse_fetcher_attrset(&attr_set, &spec);
+        assert!(!attrs.params.contains_key("repo"));
+        assert_eq!(attrs.params.get("owner"), Some(&"test-org".to_string()));
+    }
+
+    #[test]
+    fn test_parse_fetcher_attrset_allow_all_interpolation() {
+        let content = r#"{ owner = "${pname}-org"; rev = "v1.0.0"; }"#;
+        let root = parse_root(content);
+        let attr_set = root
+            .traverse()
+            .find(|n| n.kind() == rnix::SyntaxKind::NODE_ATTR_SET)
+            .unwrap();
+        let mut spec = super::InterpolationSpec::none();
+        spec.allow_all(HashMap::from([("pname".to_string(), "foo".to_string())]));
+        let attrs = super::parse_fetcher_attrset(&attr_set, &spec);
+        // owner interpolation is allowed via allow_all
+        assert!(attrs.interpolated.contains_key("owner"));
+        assert!(!attrs.interpolated_unresolved.iter().any(|k| k == "owner"));
+        assert_eq!(attrs.params.get("rev"), Some(&"v1.0.0".to_string()));
+    }
+
+    #[test]
+    fn test_parse_fetcher_attrset_allow_all_and_field_specific_merge() {
+        let content = r#"{ rev = "${pname}-${version}"; owner = "${pname}-org"; }"#;
+        let root = parse_root(content);
+        let attr_set = root
+            .traverse()
+            .find(|n| n.kind() == rnix::SyntaxKind::NODE_ATTR_SET)
+            .unwrap();
+        let mut spec = super::InterpolationSpec::none();
+        spec.allow_all(HashMap::from([("pname".to_string(), "foo".to_string())]));
+        spec.allow(
+            "rev",
+            HashMap::from([("version".to_string(), "1.0".to_string())]),
+        );
+        let attrs = super::parse_fetcher_attrset(&attr_set, &spec);
+        // rev uses both pname (from allow_all) and version (from field-specific)
+        assert!(attrs.interpolated.contains_key("rev"));
+        // owner uses only pname (from allow_all)
+        assert!(attrs.interpolated.contains_key("owner"));
+        assert!(attrs.interpolated_unresolved.is_empty());
     }
 }

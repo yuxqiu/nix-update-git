@@ -142,6 +142,37 @@ Supported source-ref behaviors:
 - Pure commit-hash ref uses `version` to find newer upstream tags, then updates `version` and the ref.
 - Empty source ref can be populated from `version`.
 - Interpolated source refs that depend on `${version}` (in `rec` attrsets) update `version`; the interpolated ref text stays as-is.
+- Interpolated source refs that combine `${pname}` and `${version}` (for example `rev = "${pname}-${version}"`) update `version`; the interpolated ref text stays as-is.
+
+Fetcher attributes may also reference `pname` and other pure string attributes from the `mkDerivation` attrset via bare idents or string interpolation, when the attrset is `rec` or lambda-wrapped:
+
+```nix
+stdenv.mkDerivation rec {
+  pname = "my-package";
+  version = "1.0.0";
+  src = fetchFromGitHub {
+    owner = "my-org";
+    repo = pname;                    # bare ident
+    rev = "v${version}";
+    hash = "sha256-...";
+  };
+};
+```
+
+```nix
+stdenv.mkDerivation (finalAttrs: {
+  pname = "my-package";
+  version = "1.0.0";
+  src = fetchFromGitHub {
+    owner = "${finalAttrs.pname}-org";  # dotted interpolation
+    repo = finalAttrs.pname;            # bare ident
+    rev = "v${finalAttrs.version}";
+    hash = "sha256-...";
+  };
+});
+```
+
+Any pure string attribute (not just `pname`) from the `mkDerivation` attrset can be referenced this way. Without `rec` or a lambda wrapper, variable references in the fetcher are not resolved and the call is skipped.
 
 ```nix
 stdenv.mkDerivation rec {

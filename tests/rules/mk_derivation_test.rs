@@ -932,3 +932,242 @@ fn test_mk_derivation_rec_and_final_attrs_interpolated_final_attrs_version() {
     assert!(stdout.contains("fetchgit.hash"), "stdout: {}", stdout);
     assert!(!stdout.contains("fetchgit.rev"), "stdout: {}", stdout);
 }
+
+#[test]
+fn test_mk_derivation_pname_bare_ident_in_url() {
+    if !nix_prefetch_git_is_available() {
+        return;
+    }
+
+    let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
+
+    // pname is used as a bare ident for the fetcher url
+    let nix_content = format!(
+        r#"{{
+  foo = stdenv.mkDerivation rec {{
+    pname = "{path}";
+    version = "v1.0.0";
+    src = fetchgit {{
+      url = pname;
+      rev = "v${{version}}";
+      hash = "";
+    }};
+  }};
+}}"#,
+        path = repo.path_str()
+    );
+
+    let nix_dir = tempdir().unwrap();
+    let nix_path = nix_dir.path().join("test.nix");
+    fs::write(&nix_path, &nix_content).unwrap();
+
+    let out = Command::cargo_bin("nix-update-git")
+        .unwrap()
+        .arg(nix_path.to_str().unwrap())
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("mkDerivation.version"),
+        "should detect version update, stdout: {}",
+        stdout
+    );
+    assert!(stdout.contains("fetchgit.hash"), "stdout: {}", stdout);
+    // rev is interpolated — should NOT produce a rev update
+    assert!(!stdout.contains("fetchgit.rev"), "stdout: {}", stdout);
+}
+
+#[test]
+fn test_mk_derivation_pname_interpolation_in_url() {
+    if !nix_prefetch_git_is_available() {
+        return;
+    }
+
+    let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
+
+    // pname is used via string interpolation in the fetcher url
+    let nix_content = format!(
+        r#"{{
+  foo = stdenv.mkDerivation rec {{
+    pname = "{path}";
+    version = "v1.0.0";
+    src = fetchgit {{
+      url = "${{pname}}";
+      rev = "v${{version}}";
+      hash = "";
+    }};
+  }};
+}}"#,
+        path = repo.path_str()
+    );
+
+    let nix_dir = tempdir().unwrap();
+    let nix_path = nix_dir.path().join("test.nix");
+    fs::write(&nix_path, &nix_content).unwrap();
+
+    let out = Command::cargo_bin("nix-update-git")
+        .unwrap()
+        .arg(nix_path.to_str().unwrap())
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("mkDerivation.version"),
+        "should detect version update, stdout: {}",
+        stdout
+    );
+    assert!(stdout.contains("fetchgit.hash"), "stdout: {}", stdout);
+    // rev is interpolated — should NOT produce a rev update
+    assert!(!stdout.contains("fetchgit.rev"), "stdout: {}", stdout);
+}
+
+#[test]
+fn test_mk_derivation_pname_interpolation_lambda_wrapped() {
+    if !nix_prefetch_git_is_available() {
+        return;
+    }
+
+    let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
+
+    // pname used via ${finalAttrs.pname} in lambda-wrapped mkDerivation
+    let nix_content = format!(
+        r#"{{
+  foo = stdenv.mkDerivation (finalAttrs: {{
+    pname = "{path}";
+    version = "v1.0.0";
+    src = fetchgit {{
+      url = "${{finalAttrs.pname}}";
+      rev = "v${{finalAttrs.version}}";
+      hash = "";
+    }};
+  }});
+}}"#,
+        path = repo.path_str()
+    );
+
+    let nix_dir = tempdir().unwrap();
+    let nix_path = nix_dir.path().join("test.nix");
+    fs::write(&nix_path, &nix_content).unwrap();
+
+    let out = Command::cargo_bin("nix-update-git")
+        .unwrap()
+        .arg(nix_path.to_str().unwrap())
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("mkDerivation.version"),
+        "should detect version update, stdout: {}",
+        stdout
+    );
+    assert!(stdout.contains("fetchgit.hash"), "stdout: {}", stdout);
+    // rev is interpolated — should NOT produce a rev update
+    assert!(!stdout.contains("fetchgit.rev"), "stdout: {}", stdout);
+}
+
+#[test]
+fn test_mk_derivation_multi_var_interpolated_rev() {
+    if !nix_prefetch_git_is_available() {
+        return;
+    }
+
+    let repo = TestRepo::new(&["foo-v1.0.0", "foo-v2.0.0"]);
+
+    // rev uses both pname and version: rev = "${pname}-${version}"
+    let nix_content = format!(
+        r#"{{
+  foo = stdenv.mkDerivation rec {{
+    pname = "foo";
+    version = "v1.0.0";
+    src = fetchgit {{
+      url = "{path}";
+      rev = "${{pname}}-${{version}}";
+      hash = "";
+    }};
+  }};
+}}"#,
+        path = repo.path_str()
+    );
+
+    let nix_dir = tempdir().unwrap();
+    let nix_path = nix_dir.path().join("test.nix");
+    fs::write(&nix_path, &nix_content).unwrap();
+
+    let out = Command::cargo_bin("nix-update-git")
+        .unwrap()
+        .arg(nix_path.to_str().unwrap())
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("mkDerivation.version"),
+        "should detect version update, stdout: {}",
+        stdout
+    );
+    assert!(stdout.contains("fetchgit.hash"), "stdout: {}", stdout);
+    // rev is interpolated — should NOT produce a rev update
+    assert!(!stdout.contains("fetchgit.rev"), "stdout: {}", stdout);
+}
+
+#[test]
+fn test_mk_derivation_no_pname_skips_interpolated_url() {
+    // Without rec or lambda, pname is not available for interpolation,
+    // so url = "${pname}" should cause the call to be skipped.
+    let _repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
+
+    let nix_content = r#"{
+  foo = stdenv.mkDerivation {
+    pname = "foo";
+    version = "v1.0.0";
+    src = fetchgit {
+      url = "${pname}";
+      rev = "v1.0.0";
+      hash = "";
+    };
+  };
+}"#
+    .to_string();
+
+    let nix_dir = tempdir().unwrap();
+    let nix_path = nix_dir.path().join("test.nix");
+    fs::write(&nix_path, &nix_content).unwrap();
+
+    let out = Command::cargo_bin("nix-update-git")
+        .unwrap()
+        .arg(nix_path.to_str().unwrap())
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // No mkDerivation updates expected because url interpolation
+    // is unresolved without rec/lambda self-reference.
+    assert!(
+        !stdout.contains("mkDerivation.version"),
+        "should not detect update when url interpolation is unresolved, stdout: {}",
+        stdout
+    );
+}

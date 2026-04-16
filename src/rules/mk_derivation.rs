@@ -34,6 +34,11 @@ struct MkDerivationCall {
     fetcher_params: HashMap<String, String>,
     fetcher_source_ranges: HashMap<String, TextRange>,
     fetcher_sparse_checkout: Vec<String>,
+    /// Stable variable bindings (pname and other pure string attrs)
+    /// that can be used to resolve fetcher interpolations alongside
+    /// version.  Keys are variable names as they appear in Nix
+    /// interpolations (e.g. `"pname"`, `"finalAttrs.pname"`).
+    extra_vars: HashMap<String, String>,
     pinned: bool,
 }
 
@@ -75,6 +80,29 @@ impl MkDerivationRule {
             return None;
         }
 
+        // Collect pure string attributes from the mkDerivation attrset
+        // (pname and any others) that may be referenced by the
+        // fetcher call via bare idents or string interpolation.
+        let mut stable_attrs: HashMap<String, String> = HashMap::new();
+        for child in arg.children() {
+            if child.kind() != rnix::SyntaxKind::NODE_ATTRPATH_VALUE {
+                continue;
+            }
+            let segments = child.attrpath_segments();
+            if segments.len() != 1 {
+                continue;
+            }
+            let key = segments[0].clone();
+            if key == "version" {
+                continue;
+            }
+            if let Some(value) = child.attr_value()
+                && let Some(content) = value.pure_string_content()
+            {
+                stable_attrs.insert(key, content);
+            }
+        }
+
         let is_recursive = arg.text().trim_start().starts_with("rec");
 
         // For lambda-wrapped patterns like mkDerivation (finalAttrs: { ... }),
@@ -111,9 +139,41 @@ impl MkDerivationRule {
             return None;
         }
 
+        // Build variable maps for pname and other stable attrs so
+        // the fetcher can reference them via bare idents (e.g.
+        // `repo = pname`) or string interpolation (e.g.
+        // `owner = "${pname}-org"`).  In rec {} attrsets, bare
+        // names are valid.  With a lambda param, dotted references
+        // like ${finalAttrs.pname} are valid.
+        let mut ident_vars: HashMap<String, String> = HashMap::new();
+        let mut interpolation_vars: HashMap<String, String> = HashMap::new();
+        if is_recursive {
+            for (key, value) in &stable_attrs {
+                ident_vars.insert(key.clone(), value.clone());
+                interpolation_vars.insert(key.clone(), value.clone());
+            }
+        }
+        if let Some(ref param) = lambda_param {
+            for (key, value) in &stable_attrs {
+                // Bare form is always valid for ident resolution
+                // even inside lambda-wrapped attrsets.
+                ident_vars.insert(key.clone(), value.clone());
+                let dotted = format!("{}.{}", param, key);
+                interpolation_vars.insert(dotted, value.clone());
+            }
+        }
+
         // Build interpolation spec: allow tag/rev/ref to be interpolated
         // with the version variable(s) when self-reference is available.
+        // Also allow any field to use pname/other stable vars via
+        // allow_all, and resolve bare idents via ident_vars.
         let mut spec = InterpolationSpec::none();
+        if !interpolation_vars.is_empty() {
+            spec.allow_all(interpolation_vars.clone());
+        }
+        if !ident_vars.is_empty() {
+            spec.allow_idents(ident_vars);
+        }
         if !version_vars.is_empty() {
             // Merge all version variable mappings into one map per field,
             // so that both ${version} and ${finalAttrs.version} resolve
@@ -128,6 +188,30 @@ impl MkDerivationRule {
         }
 
         let mut attrs = parse_fetcher_attrset(&src_arg, &spec);
+
+        // Resolve interpolated fields that only use stable variables
+        // (pname, etc.) into params so they're available for git_url()
+        // etc.  Fields that also depend on version are left in
+        // `interpolated` for later re-resolution.  Source ref fields
+        // (tag/rev/ref) are always kept in `interpolated` regardless.
+        let source_ref_keys = ["tag", "rev", "ref"];
+        let resolved_keys: Vec<String> = attrs
+            .interpolated
+            .keys()
+            .filter(|k| !source_ref_keys.contains(&k.as_str()))
+            .cloned()
+            .collect();
+        for key in resolved_keys {
+            if let Some(template) = attrs.interpolated.remove(&key) {
+                // Try resolution with stable vars only; if the field
+                // also depends on version, keep it in interpolated.
+                if let Some(resolved) = template.interpolated_string_content(&interpolation_vars) {
+                    attrs.params.insert(key, resolved);
+                } else {
+                    attrs.interpolated.insert(key, template);
+                }
+            }
+        }
 
         // Conservatively skip if any operational key is interpolated but
         // not permitted by the spec (e.g., url, owner, repo).
@@ -162,7 +246,11 @@ impl MkDerivationRule {
                 // (which should always match since the spec already validated it).
                 let detected_var = version_vars
                     .iter()
-                    .find(|v| template_node.interpolated_single_var_affixes(v).is_some())
+                    .find(|v| {
+                        template_node
+                            .interpolated_var_affixes(v, &interpolation_vars)
+                            .is_some()
+                    })
                     .cloned()
                     .unwrap_or_else(|| version_vars.first().cloned().unwrap_or_default());
                 SourceRefValue::InterpolatedFromVersion {
@@ -196,6 +284,7 @@ impl MkDerivationRule {
             fetcher_params: attrs.params,
             fetcher_source_ranges: attrs.source_ranges,
             fetcher_sparse_checkout: attrs.sparse_checkout,
+            extra_vars: interpolation_vars,
             pinned,
         })
     }
@@ -218,8 +307,9 @@ impl MkDerivationRule {
         template_node: &NixNode,
         resolved_ref: &str,
         version_var: &str,
+        vars: &HashMap<String, String>,
     ) -> Option<String> {
-        let (prefix, suffix) = template_node.interpolated_single_var_affixes(version_var)?;
+        let (prefix, suffix) = template_node.interpolated_var_affixes(version_var, vars)?;
         if !resolved_ref.starts_with(&prefix) || !resolved_ref.ends_with(&suffix) {
             return None;
         }
@@ -287,7 +377,7 @@ impl MkDerivationRule {
                 template_node,
                 version_var,
             } => {
-                let mut vars = HashMap::new();
+                let mut vars = call.extra_vars.clone();
                 vars.insert(version_var.clone(), call.version_value.clone());
                 if let Some(resolved_ref) = template_node.interpolated_string_content(&vars)
                     && let Some(latest_ref) =
@@ -298,6 +388,7 @@ impl MkDerivationRule {
                         template_node,
                         &latest_ref,
                         version_var,
+                        &call.extra_vars,
                     )
                     && VersionDetector::is_version(&candidate_version)
                     && VersionDetector::compare(&call.version_value, &candidate_version)
@@ -357,7 +448,7 @@ impl MkDerivationRule {
                         template_node,
                         version_var,
                     } => {
-                        let mut vars = HashMap::new();
+                        let mut vars = call.extra_vars.clone();
                         vars.insert(version_var.clone(), target_version.clone());
                         template_node
                             .interpolated_string_content(&vars)

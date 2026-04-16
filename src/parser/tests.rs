@@ -364,3 +364,95 @@ fn test_find_bool_value_non_bool() {
     let attr_set = find_attr_set(&root).unwrap();
     assert_eq!(attr_set.find_bool_value("foo"), None);
 }
+
+#[test]
+fn test_interpolated_var_affixes_single_var() {
+    let content = r#"{ rev = "v${version}"; }"#;
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    let node = attr_set.find_attr_by_key("rev").unwrap();
+    let value = node.attr_value().unwrap();
+    let vars = std::collections::HashMap::new();
+    assert_eq!(
+        value.interpolated_var_affixes("version", &vars),
+        Some(("v".to_string(), "".to_string()))
+    );
+}
+
+#[test]
+fn test_interpolated_var_affixes_multi_var() {
+    let content = r#"{ rev = "${pname}-${version}"; }"#;
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    let node = attr_set.find_attr_by_key("rev").unwrap();
+    let value = node.attr_value().unwrap();
+    let mut vars = std::collections::HashMap::new();
+    vars.insert("pname".to_string(), "foo".to_string());
+    assert_eq!(
+        value.interpolated_var_affixes("version", &vars),
+        Some(("foo-".to_string(), "".to_string()))
+    );
+}
+
+#[test]
+fn test_interpolated_var_affixes_multi_var_with_suffix() {
+    let content = r#"{ rev = "${pname}-${version}-release"; }"#;
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    let node = attr_set.find_attr_by_key("rev").unwrap();
+    let value = node.attr_value().unwrap();
+    let mut vars = std::collections::HashMap::new();
+    vars.insert("pname".to_string(), "foo".to_string());
+    assert_eq!(
+        value.interpolated_var_affixes("version", &vars),
+        Some(("foo-".to_string(), "-release".to_string()))
+    );
+}
+
+#[test]
+fn test_interpolated_var_affixes_missing_stable_var() {
+    let content = r#"{ rev = "${pname}-${version}"; }"#;
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    let node = attr_set.find_attr_by_key("rev").unwrap();
+    let value = node.attr_value().unwrap();
+    let vars = std::collections::HashMap::new();
+    // pname not in vars → cannot resolve → None
+    assert_eq!(value.interpolated_var_affixes("version", &vars), None);
+}
+
+#[test]
+fn test_interpolated_var_affixes_target_var_twice() {
+    let content = r#"{ rev = "${version}-${version}"; }"#;
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    let node = attr_set.find_attr_by_key("rev").unwrap();
+    let value = node.attr_value().unwrap();
+    let vars = std::collections::HashMap::new();
+    // version appears twice → None
+    assert_eq!(value.interpolated_var_affixes("version", &vars), None);
+}
+
+#[test]
+fn test_interpolated_var_affixes_no_target_var() {
+    let content = r#"{ rev = "${pname}-src"; }"#;
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    let node = attr_set.find_attr_by_key("rev").unwrap();
+    let value = node.attr_value().unwrap();
+    let mut vars = std::collections::HashMap::new();
+    vars.insert("pname".to_string(), "foo".to_string());
+    // version not present → None
+    assert_eq!(value.interpolated_var_affixes("version", &vars), None);
+}
+
+#[test]
+fn test_interpolated_var_affixes_non_string() {
+    let content = "{ foo = 123; }";
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    let node = attr_set.find_attr_by_key("foo").unwrap();
+    let value = node.attr_value().unwrap();
+    let vars = std::collections::HashMap::new();
+    assert_eq!(value.interpolated_var_affixes("version", &vars), None);
+}
