@@ -3,7 +3,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use assert_cmd::Command;
-use insta;
 use libtest_mimic::{Arguments, Failed, Trial};
 use serde::Serialize;
 use walkdir::WalkDir;
