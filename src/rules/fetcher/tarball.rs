@@ -117,16 +117,6 @@ fn build_tarball_url(
             };
             Ok(format!("{}/+archive/{}.tar.gz", base_url, rev_or_tag))
         }
-        FetcherKind::FetchFromSavannah => {
-            let repo = params
-                .get("repo")
-                .with_context(|| "missing 'repo' parameter for fetchFromSavannah")?;
-            let repo_tail = repo.rsplit('/').next().unwrap_or(repo);
-            Ok(format!(
-                "https://cgit.git.savannah.gnu.org/cgit/{}.git/snapshot/{}-{}.tar.gz",
-                repo, repo_tail, rev
-            ))
-        }
         FetcherKind::FetchFromRepoOrCz => {
             let repo = params
                 .get("repo")

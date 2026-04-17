@@ -13,7 +13,7 @@ impl TarballHasher {
         let tarball_bytes = Self::download(url)?;
         let dir = tempfile::tempdir().context("Failed to create temp directory")?;
         Self::unpack_tarball(&tarball_bytes, dir.path())?;
-        let content_dir = Self::find_single_subdir(dir.path())?;
+        let content_dir = Self::find_content_dir(dir.path())?;
         hash_path(&content_dir).map_err(|e| anyhow::anyhow!("{e}"))
     }
 
@@ -39,16 +39,22 @@ impl TarballHasher {
         Ok(())
     }
 
-    fn find_single_subdir(parent: &Path) -> Result<PathBuf> {
+    fn find_content_dir(parent: &Path) -> Result<PathBuf> {
         let mut entries =
             fs::read_dir(parent).with_context(|| format!("Failed to read {}", parent.display()))?;
         let entry = entries
             .next()
-            .context("Tarball produced no top-level directory")?;
-        let path = entry.context("Failed to read directory entry")?.path();
-        if entries.next().is_some() {
-            anyhow::bail!("Tarball produced multiple top-level entries");
+            .context("Tarball produced no top-level entries")?;
+        let first_path = entry.context("Failed to read directory entry")?.path();
+        if entries.next().is_none() && first_path.is_dir() {
+            // Single top-level directory (e.g. GitHub's "repo-1.0/"):
+            // this is the content root, matching fetchzip's default stripRoot=true.
+            Ok(first_path)
+        } else {
+            // Multiple entries or a single file at the top level (e.g. Gitiles
+            // flat archives with stripRoot=false): the parent directory itself
+            // is the content root.
+            Ok(parent.to_path_buf())
         }
-        Ok(path)
     }
 }

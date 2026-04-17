@@ -1,0 +1,17 @@
+---
+source: tests/snapshot/main.rs
+expression: output_for_insta
+input_file: tests/snapshot/data/fetcher/gitiles_avb_hash.nix
+---
+[
+  {
+    "rule": "fetcher",
+    "field": "fetchFromGitiles.hash",
+    "old": "\"\"",
+    "new": "\"sha256-ne8pAJ1fT2BQP7FmQ9pEjHixCNtXdNHPBIATbf9oZeg=\"",
+    "range": [
+      430,
+      432
+    ]
+  }
+]

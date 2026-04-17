@@ -1,0 +1,17 @@
+---
+source: tests/snapshot/main.rs
+expression: output_for_insta
+input_file: tests/snapshot/data/fetcher/gitlab_procps_hash.nix
+---
+[
+  {
+    "rule": "fetcher",
+    "field": "fetchFromGitLab.hash",
+    "old": "\"\"",
+    "new": "\"sha256-GVWLPd9wr3e94kEEJKmOk2ghXAFIB+BiSrK6Qzyr+uk=\"",
+    "range": [
+      383,
+      385
+    ]
+  }
+]

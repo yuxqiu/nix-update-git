@@ -11,7 +11,6 @@ pub enum FetcherKind {
     FetchFromSourcehut,
     FetchFromBitbucket,
     FetchFromGitiles,
-    FetchFromSavannah,
     FetchFromRepoOrCz,
     BuiltinsFetchGit,
 }
@@ -37,9 +36,7 @@ impl FetcherKind {
             "fetchFromSourcehut" => Some(Self::FetchFromSourcehut),
             "fetchFromBitbucket" => Some(Self::FetchFromBitbucket),
             "fetchFromGitiles" => Some(Self::FetchFromGitiles),
-            "fetchFromSavannah" | "fetchFromSavannahGNU" | "fetchFromSavannahNonGNU" => {
-                Some(Self::FetchFromSavannah)
-            }
+
             "fetchFromRepoOrCz" => Some(Self::FetchFromRepoOrCz),
             "fetchGit" => Some(Self::BuiltinsFetchGit),
             _ => None,
@@ -57,7 +54,6 @@ impl FetcherKind {
             Self::FetchFromSourcehut => "fetchFromSourcehut",
             Self::FetchFromBitbucket => "fetchFromBitbucket",
             Self::FetchFromGitiles => "fetchFromGitiles",
-            Self::FetchFromSavannah => "fetchFromSavannah",
             Self::FetchFromRepoOrCz => "fetchFromRepoOrCz",
             Self::BuiltinsFetchGit => "builtins.fetchGit",
         }
@@ -135,10 +131,6 @@ impl FetcherKind {
                 Some(format!("https://bitbucket.org/{}/{}", owner, repo))
             }
             Self::FetchFromGitiles => params.get("url").cloned(),
-            Self::FetchFromSavannah => {
-                let repo = params.get("repo")?;
-                Some(format!("https://git.savannah.gnu.org/git/{}.git", repo))
-            }
             Self::FetchFromRepoOrCz => {
                 let repo = params.get("repo")?;
                 Some(format!("https://repo.or.cz/{}.git", repo))
@@ -165,7 +157,6 @@ impl FetcherKind {
             | Self::FetchFromForgejo
             | Self::FetchFromCodeberg
             | Self::FetchFromBitbucket
-            | Self::FetchFromSavannah
             | Self::FetchFromSourcehut
             | Self::FetchFromGitiles
             | Self::FetchFromRepoOrCz => params.get("fetchSubmodules").is_some_and(|v| v == "true"),
@@ -183,7 +174,6 @@ impl FetcherKind {
             | Self::FetchFromForgejo
             | Self::FetchFromCodeberg
             | Self::FetchFromBitbucket
-            | Self::FetchFromSavannah
             | Self::FetchFromSourcehut
             | Self::FetchFromGitiles
             | Self::FetchFromRepoOrCz => {
@@ -234,10 +224,7 @@ mod tests {
             FetcherKind::from_name("lib.fetchFromGitLab"),
             Some(FetcherKind::FetchFromGitLab)
         );
-        assert_eq!(
-            FetcherKind::from_name("fetchFromSavannahGNU"),
-            Some(FetcherKind::FetchFromSavannah)
-        );
+
         assert_eq!(
             FetcherKind::from_name("fetchgitPrivate"),
             Some(FetcherKind::FetchGit)
@@ -313,14 +300,6 @@ mod tests {
     }
 
     #[test]
-    fn test_fetcher_git_url_savannah() {
-        let mut params = HashMap::new();
-        params.insert("repo".to_string(), "emacs/elpa".to_string());
-        let url = FetcherKind::FetchFromSavannah.git_url(&params).unwrap();
-        assert_eq!(url, "https://git.savannah.gnu.org/git/emacs/elpa.git");
-    }
-
-    #[test]
     fn test_fetcher_git_url_repo_or_cz() {
         let mut params = HashMap::new();
         params.insert("repo".to_string(), "testrepo".to_string());
@@ -384,7 +363,6 @@ mod tests {
         assert!(FetcherKind::FetchFromForgejo.uses_fetch_submodules(&params));
         assert!(FetcherKind::FetchFromCodeberg.uses_fetch_submodules(&params));
         assert!(FetcherKind::FetchFromBitbucket.uses_fetch_submodules(&params));
-        assert!(FetcherKind::FetchFromSavannah.uses_fetch_submodules(&params));
         assert!(FetcherKind::FetchFromSourcehut.uses_fetch_submodules(&params));
         assert!(FetcherKind::FetchFromGitiles.uses_fetch_submodules(&params));
         assert!(FetcherKind::FetchFromRepoOrCz.uses_fetch_submodules(&params));
@@ -435,7 +413,6 @@ mod tests {
         assert!(FetcherKind::FetchFromForgejo.uses_fetchgit(&params, false));
         assert!(FetcherKind::FetchFromCodeberg.uses_fetchgit(&params, false));
         assert!(FetcherKind::FetchFromBitbucket.uses_fetchgit(&params, false));
-        assert!(FetcherKind::FetchFromSavannah.uses_fetchgit(&params, false));
         assert!(FetcherKind::FetchFromSourcehut.uses_fetchgit(&params, false));
         assert!(FetcherKind::FetchFromGitiles.uses_fetchgit(&params, false));
         assert!(FetcherKind::FetchFromRepoOrCz.uses_fetchgit(&params, false));
@@ -532,7 +509,6 @@ mod tests {
         assert!(FetcherKind::FetchFromSourcehut.uses_tarball(&params, false));
         assert!(FetcherKind::FetchFromBitbucket.uses_tarball(&params, false));
         assert!(FetcherKind::FetchFromGitiles.uses_tarball(&params, false));
-        assert!(FetcherKind::FetchFromSavannah.uses_tarball(&params, false));
         assert!(FetcherKind::FetchFromRepoOrCz.uses_tarball(&params, false));
         assert!(!FetcherKind::FetchGit.uses_tarball(&params, false));
         assert!(!FetcherKind::BuiltinsFetchGit.uses_tarball(&params, false));

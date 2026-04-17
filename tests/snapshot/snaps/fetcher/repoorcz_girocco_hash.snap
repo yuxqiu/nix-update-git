@@ -1,0 +1,17 @@
+---
+source: tests/snapshot/main.rs
+expression: output_for_insta
+input_file: tests/snapshot/data/fetcher/repoorcz_girocco_hash.nix
+---
+[
+  {
+    "rule": "fetcher",
+    "field": "fetchFromRepoOrCz.hash",
+    "old": "\"\"",
+    "new": "\"sha256-dgqYA5zEU6+OPqi1SK4Q0erwkChxpatLtJyzAx67wUc=\"",
+    "range": [
+      344,
+      346
+    ]
+  }
+]
