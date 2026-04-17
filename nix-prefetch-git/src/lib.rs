@@ -13,10 +13,10 @@
 //! let args = PrefetchArgs {
 //!     url: "https://github.com/owner/repo".to_string(),
 //!     rev: "abc123def456".to_string(),
-//!     fetch_submodules: false,
-//!     deep_clone: false,
-//!     leave_dot_git: false,
-//!     fetch_lfs: false,
+//!     fetch_submodules: None,
+//!     deep_clone: None,
+//!     leave_dot_git: None,
+//!     fetch_lfs: None,
 //!     branch_name: None,
 //!     root_dir: None,
 //!     sparse_checkout: vec![],
@@ -135,19 +135,25 @@ pub struct PrefetchArgs {
     pub url: String,
     /// The revision (SHA-1/SHA-256 commit hash, branch, or tag) to check out.
     pub rev: String,
-    /// Whether to recursively fetch submodules.
-    pub fetch_submodules: bool,
-    /// Whether to create a deep clone (full history). Implies `--tags`
-    /// when `leave_dot_git` is also true.
-    pub deep_clone: bool,
-    /// Whether to leave the `.git` directories in the checkout. When false
-    /// (the default), `.git` is stripped and the checkout is fully
-    /// deterministic. When true, `.git` is kept but made deterministic
-    /// (repacked, garbage-collected, and stripped of non-reproducible
-    /// metadata).
-    pub leave_dot_git: bool,
-    /// Whether to fetch Git Large File Storage (LFS) objects.
-    pub fetch_lfs: bool,
+    /// Whether to recursively fetch submodules. When `None`, defaults to
+    /// `true`, matching the nixpkgs `fetchgit` default (`fetchSubmodules =
+    /// true`).
+    pub fetch_submodules: Option<bool>,
+    /// Whether to create a deep clone (full history). When `None`, defaults
+    /// to `false`, matching the nixpkgs default. A deep clone implies
+    /// `--tags` when `leave_dot_git` is also true.
+    pub deep_clone: Option<bool>,
+    /// Whether to leave the `.git` directories in the checkout. When `None`
+    /// (not explicitly set), defaults to the resolved value of `deep_clone`,
+    /// matching the nixpkgs `fetchgit` default (`leaveDotGit = deepClone ||
+    /// fetchTags`). When `Some(false)`, `.git` is stripped and the checkout
+    /// is fully deterministic. When `Some(true)`, `.git` is kept but made
+    /// deterministic (repacked, garbage-collected, and stripped of
+    /// non-reproducible metadata).
+    pub leave_dot_git: Option<bool>,
+    /// Whether to fetch Git Large File Storage (LFS) objects. When `None`,
+    /// defaults to `false`, matching the nixpkgs default.
+    pub fetch_lfs: Option<bool>,
     /// Branch name used for the local checkout. Defaults to `"fetchgit"`.
     pub branch_name: Option<String>,
     /// An optional subdirectory of the repository to use as the top-level
@@ -190,6 +196,17 @@ pub fn prefetch(args: &PrefetchArgs) -> Result<PrefetchResult> {
     ensure_git_available()?;
 
     let branch = args.branch_name.as_deref().unwrap_or("fetchgit");
+
+    // Apply nixpkgs defaults for Option<bool> fields. These match the
+    // nixpkgs fetchgit derivation defaults:
+    //   fetchSubmodules = true
+    //   deepClone = false
+    //   leaveDotGit = deepClone || fetchTags  (fetchTags not supported here)
+    //   fetchLFS = false
+    let deep_clone = args.deep_clone.unwrap_or(false);
+    let leave_dot_git = args.leave_dot_git.unwrap_or(deep_clone);
+    let fetch_submodules = args.fetch_submodules.unwrap_or(true);
+    let fetch_lfs = args.fetch_lfs.unwrap_or(false);
 
     // Create two temp directories: one for the checkout, one for
     // $HOME so git doesn't read user-level config.
@@ -255,10 +272,10 @@ pub fn prefetch(args: &PrefetchArgs) -> Result<PrefetchResult> {
     // --no-tags, tag/branch names may not be resolvable locally (they're
     // only available via FETCH_HEAD), so we need to use FETCH_HEAD for
     // checkout instead of the original rev string.
-    let shallow_fetch = if args.deep_clone {
+    let shallow_fetch = if deep_clone {
         // Full clone with optional tags.
         let mut fetch_args = vec!["fetch".to_string()];
-        if args.leave_dot_git {
+        if leave_dot_git {
             fetch_args.push("--tags".to_string());
         } else {
             fetch_args.push("--no-tags".to_string());
@@ -370,8 +387,8 @@ pub fn prefetch(args: &PrefetchArgs) -> Result<PrefetchResult> {
     .to_string();
 
     // --- Submodules --------------------------------------------------------
-    if args.fetch_submodules {
-        if args.deep_clone || args.leave_dot_git {
+    if fetch_submodules {
+        if deep_clone || leave_dot_git {
             git(
                 &clone_dir,
                 &home_dir,
@@ -402,13 +419,13 @@ pub fn prefetch(args: &PrefetchArgs) -> Result<PrefetchResult> {
     }
 
     // --- LFS ---------------------------------------------------------------
-    if args.fetch_lfs {
+    if fetch_lfs {
         git(&clone_dir, &home_dir, &["lfs", "install"])?;
         git(&clone_dir, &home_dir, &["lfs", "pull"])?;
     }
 
     // --- Deterministic cleanup / .git removal ------------------------------
-    if args.leave_dot_git {
+    if leave_dot_git {
         make_deterministic_repos(&clone_dir, &home_dir)?;
     } else {
         remove_dot_git_dirs(&clone_dir)?;

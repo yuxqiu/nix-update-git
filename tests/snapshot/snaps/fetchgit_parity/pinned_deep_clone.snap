@@ -8,7 +8,7 @@ input_file: tests/snapshot/data/fetchgit_parity/pinned_deep_clone.nix
     "rule": "fetcher",
     "field": "fetchgit.hash",
     "old": "\"\"",
-    "new": "\"sha256-DDga3Xty/T2EoohP8rj+IX0oxbz8//INIujb+VhwScs=\"",
+    "new": "\"sha256-JZAmMDC/TIqPk7g0pCB0rJQ3ofBRbVd9DaBj1bkO2tw=\"",
     "range": [
       615,
       617

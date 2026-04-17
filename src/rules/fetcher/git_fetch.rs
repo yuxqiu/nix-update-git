@@ -5,10 +5,6 @@ use nix_prefetch_git::{NarHash, PrefetchArgs, prefetch};
 
 use super::kind::FetcherKind;
 
-fn bool_param(params: &HashMap<String, String>, key: &str) -> bool {
-    params.get(key).is_some_and(|v| v == "true")
-}
-
 pub fn compute_hash(
     kind: &FetcherKind,
     params: &HashMap<String, String>,
@@ -26,15 +22,21 @@ pub fn compute_hash(
         "fetchSubmodules"
     };
 
-    let fetch_submodules = bool_param(params, submodules_key);
+    // Pass Option<bool> for all boolean fields: None means "use nixpkgs default"
+    // (the nix-prefetch-git library resolves defaults internally). This lets us
+    // distinguish "not specified" from "explicitly set to false".
+    let fetch_submodules = params.get(submodules_key).map(|v| v == "true");
+    let deep_clone = params.get("deepClone").map(|v| v == "true");
+    let leave_dot_git = params.get("leaveDotGit").map(|v| v == "true");
+    let fetch_lfs = params.get("fetchLFS").map(|v| v == "true");
 
     let args = PrefetchArgs {
         url: git_url.clone(),
         rev: rev.to_string(),
         fetch_submodules,
-        deep_clone: bool_param(params, "deepClone"),
-        leave_dot_git: bool_param(params, "leaveDotGit"),
-        fetch_lfs: bool_param(params, "fetchLFS"),
+        deep_clone,
+        leave_dot_git,
+        fetch_lfs,
         branch_name: params.get("branchName").cloned(),
         root_dir: params.get("rootDir").cloned().filter(|v| !v.is_empty()),
         sparse_checkout: sparse_checkout.to_vec(),
@@ -45,7 +47,7 @@ pub fn compute_hash(
             "Failed to prefetch git repository {} @ {}{}: {e}",
             git_url,
             rev,
-            if fetch_submodules {
+            if fetch_submodules.unwrap_or(true) {
                 " (with submodules)"
             } else {
                 ""
