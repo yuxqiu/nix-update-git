@@ -8,8 +8,8 @@ repository = "https://github.com/yuxqiu/nix-update-git"
 homepage = "https://github.com/yuxqiu/nix-update-git"
 
 [dependencies]
-base64 = { workspace = true }
-nix-base32 = { workspace = true }
-nix-nar = { workspace = true }
-sha2 = { workspace = true }
+base64 = "0.22"
+nix-base32 = "0.2"
+nix-nar = "0.3"
+sha2 = "0.10"
 tempfile = { workspace = true }

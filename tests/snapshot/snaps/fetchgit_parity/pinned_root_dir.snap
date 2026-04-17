@@ -1,6 +1,5 @@
 ---
-source: tests/snapshot/mod.rs
-assertion_line: 120
+source: tests/snapshot/main.rs
 expression: output_for_insta
 input_file: tests/snapshot/data/fetchgit_parity/pinned_root_dir.nix
 ---

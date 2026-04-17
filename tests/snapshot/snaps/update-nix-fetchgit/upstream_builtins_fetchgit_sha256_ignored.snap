@@ -1,5 +1,5 @@
 ---
-source: tests/snapshot/mod.rs
+source: tests/snapshot/main.rs
 expression: output_for_insta
 input_file: tests/snapshot/data/update-nix-fetchgit/upstream_builtins_fetchgit_sha256_ignored.nix
 ---

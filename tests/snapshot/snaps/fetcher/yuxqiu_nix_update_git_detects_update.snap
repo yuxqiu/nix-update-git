@@ -1,5 +1,5 @@
 ---
-source: tests/snapshot/mod.rs
+source: tests/snapshot/main.rs
 expression: output_for_insta
 input_file: tests/snapshot/data/fetcher/yuxqiu_nix_update_git_detects_update.nix
 ---

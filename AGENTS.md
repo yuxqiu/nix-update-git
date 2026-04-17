@@ -14,14 +14,26 @@ There is no separate typecheck or lint step — clippy covers it.
 
 Unit tests live in `src/**/tests` modules. Integration tests live in `tests/rules/*.rs`.
 
-Snapshot tests use [insta](https://insta.rs/) and are defined in `tests/snapshot/`. See `docs/CONTRIBUTING_TESTS.md` for how to add new tests.
+Snapshot tests use [insta](https://insta.rs/) and are defined in `tests/snapshot/`. They run as a separate test binary (`--test snapshot`) with a custom harness (`libtest_mimic`) that registers each `.nix` file as an individual test case, giving per-file progress in `cargo test` output. See `docs/CONTRIBUTING_TESTS.md` for how to add new tests.
 
 Several integration tests create temporary git repos using the `TestRepo` helper in `tests/rules/common/mod.rs`. It disables GPG signing to avoid hanging.
 
-Network-dependent tests are gated behind the `network-tests` feature flag (`#[cfg_attr(not(feature = "network-tests"), ignore)]`). Running `cargo test` (default) skips them. To include network tests:
+Network-dependent snapshot tests are automatically ignored when the `network-tests` feature is not enabled (via `libtest_mimic`'s `with_ignored_flag`). Other network-dependent unit/integration tests use `#[cfg_attr(not(feature = "network-tests"), ignore)]`. Running `cargo test` (default) skips them. To include network tests:
 
 ```bash
 cargo test --features network-tests
+```
+
+To run only snapshot tests:
+
+```bash
+cargo test --features network-tests --test snapshot
+```
+
+To run only non-snapshot integration tests:
+
+```bash
+cargo test --test mod
 ```
 
 Nix builds exclude network tests via `cargoTestFlags = [ "--no-default-features" ]` in `flake.nix`.
