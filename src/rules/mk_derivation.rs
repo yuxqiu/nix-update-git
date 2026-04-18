@@ -299,6 +299,7 @@ impl MkDerivationRule {
         match kind.hash_strategy(params, has_sparse_checkout) {
             HashStrategy::Tarball => tarball::compute_hash(kind, params, rev),
             HashStrategy::Git => git_fetch::compute_hash(kind, params, rev, sparse_checkout),
+            HashStrategy::Patch => anyhow::bail!("Patch hashing should be handled by fetcher rule"),
             HashStrategy::None => anyhow::bail!("No hash needed for this fetcher"),
         }
     }

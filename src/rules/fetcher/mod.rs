@@ -232,6 +232,13 @@ pub(crate) fn parse_fetcher_attrset(attr_set: &NixNode, spec: &InterpolationSpec
                     // using the ident bindings from the spec.
                     params.insert(key, resolved.clone());
                 }
+            } else if value.kind() == rnix::SyntaxKind::NODE_LITERAL {
+                // Handle integer/float literals (e.g. `stripLen = 1`)
+                // Store the text representation so numeric attributes are
+                // available in params for lookups like stripLen parsing.
+                let range = value.text_range();
+                source_ranges.insert(key.clone(), range);
+                params.insert(key, value.text_trimmed().to_string());
             } else if key == "sparseCheckout" && value.kind() == rnix::SyntaxKind::NODE_LIST {
                 for item in value.children() {
                     if item.kind() == rnix::SyntaxKind::NODE_STRING
@@ -334,6 +341,68 @@ impl FetcherRule {
             Ok(None)
         } else {
             Ok(Some(updates))
+        }
+    }
+
+    /// Handle a fetchpatch call: fill in empty hashes using the
+    /// URL-based patch normalization strategy.
+    fn check_fetchpatch_call(call: &FetcherCall) -> Result<Option<Vec<Update>>> {
+        let url = match call.params.get("url") {
+            Some(url) => url,
+            None => return Ok(None),
+        };
+
+        let has_empty_hash = call.params.get("hash").is_some_and(|h| h.is_empty())
+            || call.params.get("sha256").is_some_and(|h| h.is_empty());
+
+        if !has_empty_hash {
+            return Ok(None);
+        }
+
+        // Determine strip count: fetchpatch passes `--strip=${stripLen}`
+        // to filterdiff, which strips that many path components from the
+        // output. The subsequent `filterdiff -p1` only affects matching
+        // (—strip-match), NOT the output paths. So the total strip is
+        // just stripLen (default 0).
+        let strip_len: usize = call
+            .params
+            .get("stripLen")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        let total_strip = strip_len;
+
+        let result = crate::utils::PatchHasher::hash_patch_url(url, total_strip);
+
+        match result {
+            Ok(nar_hash) => {
+                let mut updates = Vec::new();
+                if let Some(range) = call.source_ranges.get("hash") {
+                    updates.push(Update::new(
+                        format!("{}.hash", call.kind.name()),
+                        format!("\"{}\"", nar_hash.sri),
+                        *range,
+                    ));
+                }
+                if let Some(range) = call.source_ranges.get("sha256") {
+                    updates.push(Update::new(
+                        format!("{}.sha256", call.kind.name()),
+                        format!("\"{}\"", nar_hash.nix32),
+                        *range,
+                    ));
+                }
+                if updates.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(updates))
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "Warning: could not prefetch hash for fetchpatch {}: {:#}",
+                    url, e
+                );
+                Ok(None)
+            }
         }
     }
 
@@ -478,6 +547,10 @@ impl FetcherRule {
             HashStrategy::Git => {
                 git_fetch::compute_hash(&call.kind, &call.params, rev, &call.sparse_checkout)
             }
+            HashStrategy::Patch => {
+                // Patch hashing is handled separately in check_fetchpatch_call
+                anyhow::bail!("Patch hashing should be handled via check_fetchpatch_call")
+            }
             HashStrategy::None => anyhow::bail!("No hash needed for this fetcher"),
         }
     }
@@ -568,7 +641,23 @@ impl UpdateRule for FetcherRule {
             Some(call) => call,
             None => return Ok(None),
         };
-        self.check_fetcher_call(&call)
+
+        // fetchpatch uses a URL-based hash strategy (flat SHA-256 of the
+        // normalized patch content), not a git-based one.
+        match call.kind {
+            FetcherKind::FetchPatch => Self::check_fetchpatch_call(&call),
+            FetcherKind::BuiltinsFetchGit
+            | FetcherKind::FetchGit
+            | FetcherKind::FetchFromGitHub
+            | FetcherKind::FetchFromGitLab
+            | FetcherKind::FetchFromGitea
+            | FetcherKind::FetchFromForgejo
+            | FetcherKind::FetchFromCodeberg
+            | FetcherKind::FetchFromBitbucket
+            | FetcherKind::FetchFromSourcehut
+            | FetcherKind::FetchFromGitiles
+            | FetcherKind::FetchFromRepoOrCz => self.check_fetcher_call(&call),
+        }
     }
 }
 

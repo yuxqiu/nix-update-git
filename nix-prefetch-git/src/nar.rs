@@ -38,6 +38,19 @@ pub fn hash_path(path: &Path) -> crate::Result<NarHash> {
     Ok(digest_to_nar_hash(&hasher.finalize()))
 }
 
+/// Compute a flat SHA-256 hash of raw bytes.
+///
+/// This produces the same hash as `outputHashMode = "flat"` in Nix,
+/// which simply hashes the file content directly (not NAR-serialized).
+/// Used by `fetchurl` and `fetchpatch` which use flat hashing.
+pub fn flat_hash(content: &[u8]) -> NarHash {
+    let digest = Sha256::digest(content);
+    NarHash {
+        sri: format!("sha256-{}", STANDARD.encode(digest)),
+        nix32: nix_base32::to_nix_base32(&digest),
+    }
+}
+
 fn digest_to_nar_hash(digest: &[u8]) -> NarHash {
     NarHash {
         sri: format!("sha256-{}", STANDARD.encode(digest)),

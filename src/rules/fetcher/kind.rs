@@ -13,6 +13,7 @@ pub enum FetcherKind {
     FetchFromGitiles,
     FetchFromRepoOrCz,
     BuiltinsFetchGit,
+    FetchPatch,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,6 +21,7 @@ pub enum HashStrategy {
     Tarball,
     Git,
     None,
+    Patch,
 }
 
 impl FetcherKind {
@@ -36,9 +38,9 @@ impl FetcherKind {
             "fetchFromSourcehut" => Some(Self::FetchFromSourcehut),
             "fetchFromBitbucket" => Some(Self::FetchFromBitbucket),
             "fetchFromGitiles" => Some(Self::FetchFromGitiles),
-
             "fetchFromRepoOrCz" => Some(Self::FetchFromRepoOrCz),
             "fetchGit" => Some(Self::BuiltinsFetchGit),
+            "fetchpatch" => Some(Self::FetchPatch),
             _ => None,
         }
     }
@@ -56,6 +58,7 @@ impl FetcherKind {
             Self::FetchFromGitiles => "fetchFromGitiles",
             Self::FetchFromRepoOrCz => "fetchFromRepoOrCz",
             Self::BuiltinsFetchGit => "builtins.fetchGit",
+            Self::FetchPatch => "fetchpatch",
         }
     }
 
@@ -71,6 +74,9 @@ impl FetcherKind {
         if !self.needs_hash() {
             return HashStrategy::None;
         }
+        if matches!(self, Self::FetchPatch) {
+            return HashStrategy::Patch;
+        }
         if self.uses_tarball(params, has_sparse_checkout) {
             HashStrategy::Tarball
         } else {
@@ -80,7 +86,7 @@ impl FetcherKind {
 
     pub fn git_url(&self, params: &HashMap<String, String>) -> Option<String> {
         match self {
-            Self::FetchGit => params.get("url").cloned(),
+            Self::FetchGit | Self::FetchPatch => params.get("url").cloned(),
             Self::FetchFromGitHub => {
                 let owner = params.get("owner")?;
                 let repo = params.get("repo")?;
@@ -162,6 +168,8 @@ impl FetcherKind {
             | Self::FetchFromRepoOrCz => params.get("fetchSubmodules").is_some_and(|v| v == "true"),
             // https://noogle.dev/f/builtins/fetchGit
             Self::BuiltinsFetchGit => params.get("submodules").is_some_and(|v| v == "true"),
+            // fetchpatch downloads a single patch file, not a git repository
+            Self::FetchPatch => false,
         }
     }
 
@@ -186,6 +194,8 @@ impl FetcherKind {
                     || has_sparse_checkout
             }
             Self::BuiltinsFetchGit => true,
+            // fetchpatch downloads a single patch file via URL, not a git clone
+            Self::FetchPatch => false,
         }
     }
 }
@@ -228,6 +238,14 @@ mod tests {
         assert_eq!(
             FetcherKind::from_name("fetchgitPrivate"),
             Some(FetcherKind::FetchGit)
+        );
+        assert_eq!(
+            FetcherKind::from_name("fetchpatch"),
+            Some(FetcherKind::FetchPatch)
+        );
+        assert_eq!(
+            FetcherKind::from_name("pkgs.fetchpatch"),
+            Some(FetcherKind::FetchPatch)
         );
         assert_eq!(FetcherKind::from_name("unknown"), None);
         assert_eq!(FetcherKind::from_name("pkgs.unknown"), None);
