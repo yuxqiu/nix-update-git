@@ -1,0 +1,17 @@
+---
+source: tests/snapshot/main.rs
+expression: output_for_insta
+input_file: tests/snapshot/data/fetchpatch/codeberg_follow_branch.nix
+---
+[
+  {
+    "rule": "fetcher",
+    "field": "fetchpatch.url",
+    "old": "\"https://codeberg.org/ddevault/scdoc/commit/0000000000000000000000000000000000000000.patch\""
+  },
+  {
+    "rule": "fetcher",
+    "field": "fetchpatch.hash",
+    "old": "\"\""
+  }
+]

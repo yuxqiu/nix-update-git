@@ -1,0 +1,17 @@
+---
+source: tests/snapshot/main.rs
+expression: output_for_insta
+input_file: tests/snapshot/data/fetcher/yuxqiu_nix_update_git_fetchgit_hash.nix
+---
+[
+  {
+    "rule": "fetcher",
+    "field": "fetchgit.hash",
+    "old": "\"\"",
+    "new": "\"sha256-XoU5agDsmgsUx4Nw5fRJHgz4zsMRwKy9C/MJvKyg2gg=\"",
+    "range": [
+      267,
+      269
+    ]
+  }
+]

@@ -10,6 +10,7 @@ use kind::{FetcherKind, HashStrategy};
 
 pub mod git_fetch;
 pub mod kind;
+pub mod patch_url;
 pub mod tarball;
 
 pub(crate) fn is_commit_hash(s: &str) -> bool {
@@ -344,19 +345,88 @@ impl FetcherRule {
         }
     }
 
-    /// Handle a fetchpatch call: fill in empty hashes using the
-    /// URL-based patch normalization strategy.
+    /// Handle a fetchpatch call: revision following, version updates,
+    /// and empty-hash filling.
+    ///
+    /// Three cases are handled:
+    ///
+    /// 1. **`# follow:<branch>`** — when the fetchpatch has a follow
+    ///    comment, parse the URL to identify the hosting platform and
+    ///    extract the current ref, then query `git ls-remote` for the
+    ///    latest commit on the specified branch.  The ref in the URL is
+    ///    replaced with the new SHA.
+    ///
+    /// 2. **Version update (not pinned)** — when the URL contains a
+    ///    version-like ref (e.g. the head of a compare range like
+    ///    `v2.0.0`), check for a newer matching tag and update the URL.
+    ///
+    /// 3. **Empty hash filling** — when `hash` or `sha256` is an empty
+    ///    string, compute and fill the patch hash.  This also runs
+    ///    whenever the URL changes (cases 1–2) to keep the hash in sync.
     fn check_fetchpatch_call(call: &FetcherCall) -> Result<Option<Vec<Update>>> {
         let url = match call.params.get("url") {
             Some(url) => url,
             None => return Ok(None),
         };
 
-        let has_empty_hash = call.params.get("hash").is_some_and(|h| h.is_empty())
-            || call.params.get("sha256").is_some_and(|h| h.is_empty());
+        let mut updates = Vec::new();
+        let mut current_url = url.clone();
+        let mut url_changed = false;
 
-        if !has_empty_hash {
-            return Ok(None);
+        // Try to parse the URL for revision following / version updates.
+        let parsed_url = patch_url::parse_patch_url(url);
+
+        // Case 1: # follow:<branch> — revision following
+        if let Some(branch) = &call.follow_branch {
+            if let Some(parsed) = &parsed_url {
+                let git_url = parsed.git_remote_url();
+                match GitFetcher::get_latest_commit(&git_url, branch) {
+                    Ok(Some(new_sha)) => {
+                        let current_ref = parsed.current_ref();
+                        if current_ref != new_sha {
+                            current_url = parsed.replace_ref(&new_sha);
+                            url_changed = true;
+                        }
+                    }
+                    Ok(None) => {
+                        eprintln!(
+                            "Warning: could not find branch '{}' for {}",
+                            branch, git_url
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Warning: could not fetch latest commit for {}: {:#}",
+                            git_url, e
+                        );
+                    }
+                }
+            }
+        } else if !call.pinned {
+            // Case 2: not pinned — try version update for URLs with
+            // version-like refs (typically compare ranges).
+            if let Some(parsed) = &parsed_url
+                && parsed.is_version_ref()
+            {
+                let git_url = parsed.git_remote_url();
+                let current = parsed.current_ref();
+                if let Ok(Some(latest)) =
+                    GitFetcher::get_latest_tag_matching(&git_url, Some(current))
+                    && VersionDetector::compare(current, &latest) == std::cmp::Ordering::Less
+                {
+                    current_url = parsed.replace_ref(&latest);
+                    url_changed = true;
+                }
+            }
+        }
+
+        // If URL changed, emit an update for it.
+        if url_changed && let Some(range) = call.source_ranges.get("url") {
+            updates.push(Update::new(
+                format!("{}.url", call.kind.name()),
+                format!("\"{}\"", current_url),
+                *range,
+            ));
         }
 
         // Determine strip count: fetchpatch passes `--strip=${stripLen}`
@@ -369,40 +439,51 @@ impl FetcherRule {
             .get("stripLen")
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
-        let total_strip = strip_len;
 
-        let result = crate::utils::PatchHasher::hash_patch_url(url, total_strip);
+        // Compute / recompute hash when:
+        // 1. URL changed (need to re-hash the new URL content), or
+        // 2. hash / sha256 is empty (fill it in).
+        let needs_hash = url_changed
+            || call.params.get("hash").is_some_and(|h| h.is_empty())
+            || call.params.get("sha256").is_some_and(|h| h.is_empty());
 
-        match result {
-            Ok(nar_hash) => {
-                let mut updates = Vec::new();
-                if let Some(range) = call.source_ranges.get("hash") {
-                    updates.push(Update::new(
-                        format!("{}.hash", call.kind.name()),
-                        format!("\"{}\"", nar_hash.sri),
-                        *range,
-                    ));
-                }
-                if let Some(range) = call.source_ranges.get("sha256") {
-                    updates.push(Update::new(
-                        format!("{}.sha256", call.kind.name()),
-                        format!("\"{}\"", nar_hash.nix32),
-                        *range,
-                    ));
-                }
-                if updates.is_empty() {
-                    Ok(None)
-                } else {
-                    Ok(Some(updates))
+        if needs_hash {
+            let has_hash_source = call.source_ranges.contains_key("hash")
+                || call.source_ranges.contains_key("sha256");
+
+            if has_hash_source {
+                let result = crate::utils::PatchHasher::hash_patch_url(&current_url, strip_len);
+                match result {
+                    Ok(nar_hash) => {
+                        if let Some(range) = call.source_ranges.get("hash") {
+                            updates.push(Update::new(
+                                format!("{}.hash", call.kind.name()),
+                                format!("\"{}\"", nar_hash.sri),
+                                *range,
+                            ));
+                        }
+                        if let Some(range) = call.source_ranges.get("sha256") {
+                            updates.push(Update::new(
+                                format!("{}.sha256", call.kind.name()),
+                                format!("\"{}\"", nar_hash.nix32),
+                                *range,
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Warning: could not prefetch hash for fetchpatch {}: {:#}",
+                            current_url, e
+                        );
+                    }
                 }
             }
-            Err(e) => {
-                eprintln!(
-                    "Warning: could not prefetch hash for fetchpatch {}: {:#}",
-                    url, e
-                );
-                Ok(None)
-            }
+        }
+
+        if updates.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(updates))
         }
     }
 

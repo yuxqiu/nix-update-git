@@ -1,0 +1,17 @@
+---
+source: tests/snapshot/main.rs
+expression: output_for_insta
+input_file: tests/snapshot/data/fetchpatch_parity/pinned_github_commit_sha256.nix
+---
+[
+  {
+    "rule": "fetcher",
+    "field": "fetchpatch.sha256",
+    "old": "\"\"",
+    "new": "\"1gs39l5fdcd1ilwzzmgkl11y68lzlwblgq9lxh3asqfzw658mw0k\"",
+    "range": [
+      698,
+      700
+    ]
+  }
+]

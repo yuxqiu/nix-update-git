@@ -36,6 +36,7 @@ rayon = "1"
 flate2 = "1"
 tar = "0.4"
 ureq = "3"
+patchkit = "0.2"
 tempfile = { workspace = true }
 nix-prefetch-git = { path = "nix-prefetch-git" }
 gix-quote = "0.7"

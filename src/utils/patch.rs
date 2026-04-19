@@ -2,11 +2,12 @@ use std::io::Read;
 
 use anyhow::{Context, Result};
 use nix_prefetch_git::NarHash;
+use patchkit::unified::{HunkLine, PlainOrBinaryPatch, UnifiedPatch, parse_patches};
 
 /// Download a patch from a URL, normalize it, and compute its flat SHA-256 hash.
 ///
 /// This mimics the normalization done by nixpkgs' `fetchpatch`:
-/// 1. Discard preamble (content before the first `diff --git` line)
+/// 1. Discard preamble (content before the first `---` line)
 /// 2. Remove `diff --git` headers (contain variable commit SHAs)
 /// 3. Remove `index` lines (contain variable object hashes)
 /// 4. Remove binary file markers and `GIT binary patch` lines
@@ -47,107 +48,191 @@ impl PatchHasher {
     }
 }
 
-/// A single file's diff section within a patch.
-#[derive(Debug, Clone)]
-struct FileSection {
-    /// The canonical file path (extracted from `diff --git a/... b/...` or
-    /// `+++ b/...`).
-    path: String,
-    /// All lines in this section, including the `diff --git` header.
-    lines: Vec<String>,
-}
-
 /// Normalize a patch content string.
 ///
 /// `total_strip` is the number of path components to strip from all
 /// file paths. For the default `fetchpatch` (stripLen=0 with
 /// `filterdiff -p1` for matching only), this is 0.
 fn normalize_patch(content: &str, total_strip: usize) -> Result<String> {
-    let sections = parse_sections(content);
-    let mut sections: Vec<FileSection> = sections
-        .into_iter()
-        .filter_map(|mut s| {
-            clean_section(&mut s.lines);
-            if has_hunk(&s.lines) { Some(s) } else { None }
-        })
-        .collect();
-
-    // Sort sections alphabetically by path (matching `lsdiff | sort -u`)
-    sections.sort_by(|a, b| a.path.cmp(&b.path));
-
-    // Re-serialize with path stripping. Do not add blank lines between
-    // sections — the nixpkgs fetchpatch normalization does not insert
-    // them, and extra blank lines would change the hash.
-    let mut result = String::new();
-    let mut first = true;
-    for section in sections.iter() {
-        for line in &section.lines {
-            let stripped = strip_path_components_in_line(line, total_strip);
-            if !first {
-                result.push('\n');
+    // Pre-process lines to handle "\\ No newline at end of file" markers.
+    // patchkit's iter_file_patch doesn't include these markers in Patch
+    // entries when they appear after the last counted hunk line, so we
+    // pre-process them here: strip the trailing newline from the preceding
+    // line and remove the marker. patchkit's HunkLine serialization will
+    // re-add the marker for lines that lack a trailing newline.
+    let lines: Vec<Vec<u8>> = {
+        let mut result: Vec<Vec<u8>> = Vec::new();
+        for line in content.split_inclusive('\n') {
+            let line_bytes = line.as_bytes();
+            if line_bytes.starts_with(b"\\ No newline at end of file") {
+                if let Some(prev) = result.last_mut()
+                    && prev.ends_with(b"\n")
+                {
+                    prev.pop();
+                }
+            } else {
+                result.push(line_bytes.to_vec());
             }
-            result.push_str(&stripped);
-            first = false;
+        }
+        result
+    };
+
+    // Parse with patchkit
+    let patches: Vec<PlainOrBinaryPatch> = parse_patches(lines.into_iter())
+        .collect::<Result<Vec<_>, _>>()
+        .with_context(|| "Failed to parse patch")?;
+
+    // Process each patch
+    let mut processed: Vec<(String, UnifiedPatch)> = Vec::new();
+
+    for patch in patches {
+        match patch {
+            PlainOrBinaryPatch::Plain(mut unified) => {
+                // Clean hunks: strip function/context text from hunk headers
+                // (like `filterdiff --clean`)
+                for hunk in &mut unified.hunks {
+                    hunk.tail = None;
+                }
+
+                // Filter out empty hunks (no added or deleted lines, only context)
+                unified.hunks.retain(|hunk| {
+                    hunk.lines.iter().any(|line| {
+                        matches!(line, HunkLine::InsertLine(_) | HunkLine::RemoveLine(_))
+                    })
+                });
+
+                // Skip patches with no hunks remaining
+                if unified.hunks.is_empty() {
+                    continue;
+                }
+
+                // Determine sort path: use orig_name (the --- a/ path) for
+                // modified and deleted files, and mod_name (the +++ b/ path)
+                // for new files. This matches `lsdiff | LC_ALL=C sort -u`
+                // behavior used by nixpkgs' filterdiff pipeline, where lsdiff
+                // reports the --- a/ path for existing files and the +++ b/
+                // path for new files. Using orig_name ensures all a/ paths
+                // sort together (before b/ paths), matching nixpkgs' sort order.
+                let sort_path = {
+                    let orig_path = path_string(&unified.orig_name);
+                    if orig_path == "/dev/null" {
+                        // New file: use the +++ b/ path
+                        path_string(&unified.mod_name)
+                    } else {
+                        // Modified or deleted file: use the --- a/ path
+                        orig_path
+                    }
+                };
+
+                // Strip path components from orig_name and mod_name
+                unified.orig_name = strip_path_bytes(&unified.orig_name, total_strip);
+                unified.mod_name = strip_path_bytes(&unified.mod_name, total_strip);
+
+                processed.push((sort_path, unified));
+            }
+            PlainOrBinaryPatch::Binary(_) => {
+                // Skip binary patches
+            }
         }
     }
-    // Ensure the result ends with a newline (matching fetchpatch behavior)
-    if !result.is_empty() && !result.ends_with('\n') {
-        result.push('\n');
+
+    // Sort by path alphabetically (matching `lsdiff | sort -u`)
+    processed.sort_by(|a, b| a.0.cmp(&b.0));
+
+    // Re-serialize each patch using as_bytes(), concatenating them.
+    // patchkit's as_bytes() only outputs --- / +++ lines and hunk content,
+    // no diff --git, index, or other metadata — matching filterdiff behavior.
+    // Do not add blank lines between sections — matching current behavior.
+    let mut result = Vec::new();
+    for (_, patch) in processed {
+        result.extend_from_slice(&patch.as_bytes());
     }
-    Ok(result)
+
+    // Ensure the result ends with a newline (matching fetchpatch behavior)
+    if !result.is_empty() && result.last() != Some(&b'\n') {
+        result.push(b'\n');
+    }
+
+    String::from_utf8(result).with_context(|| "Normalized patch content is not valid UTF-8")
 }
 
-/// Parse patch content into file sections.
+/// Extract the path string from raw bytes, handling C-style quoting.
 ///
-/// Each section starts with a `diff --git` line and includes all lines
-/// until the next `diff --git` line or end of file.
-///
-/// Content before the first `diff --git` line (preamble, email headers
-/// from git format-patch, etc.) is discarded, matching the behavior of
-/// `filterdiff --include` which only includes content for listed files.
-fn parse_sections(content: &str) -> Vec<FileSection> {
-    let mut sections: Vec<FileSection> = Vec::new();
-    let mut current_lines: Vec<String> = Vec::new();
-    let mut current_path: Option<String> = None;
+/// If the path is C-style quoted (starts with `"`), it is unquoted.
+/// Otherwise, it is converted from UTF-8 lossily.
+fn path_string(path: &[u8]) -> String {
+    let s = String::from_utf8_lossy(path);
+    if s.starts_with('"') {
+        ansi_c_unquote(&s)
+            .map(|(unquoted, _)| unquoted)
+            .unwrap_or_else(|| s.to_string())
+    } else {
+        s.to_string()
+    }
+}
 
-    for line in content.lines() {
-        if let Some(path) = parse_diff_git_path(line) {
-            // Start of a new file section; flush the previous one
-            if let Some(path) = current_path.take() {
-                sections.push(FileSection {
-                    path,
-                    lines: std::mem::take(&mut current_lines),
-                });
-            }
-            current_path = Some(path);
-            current_lines.push(line.to_string());
-        } else if current_path.is_some() {
-            current_lines.push(line.to_string());
+/// Strip N path components from a byte path, handling C-style quoting.
+///
+/// If the path is C-style quoted (starts with `"`): unquote with
+/// `ansi_c_unquote`, strip with `strip_path_n`, re-quote with `c_quote`
+/// if needed.
+///
+/// If unquoted: convert to string, strip with `strip_path_n`, convert back.
+///
+/// Never strips `/dev/null`. Returns the path as-is if `n == 0`.
+fn strip_path_bytes(path: &[u8], n: usize) -> Vec<u8> {
+    if n == 0 {
+        return path.to_vec();
+    }
+
+    let s = String::from_utf8_lossy(path);
+
+    if s.starts_with('"') {
+        // C-style quoted path
+        let (unquoted, _) = match ansi_c_unquote(&s) {
+            Some(result) => result,
+            None => return path.to_vec(),
+        };
+
+        // Don't strip /dev/null
+        if unquoted == "/dev/null" {
+            return path.to_vec();
         }
-        // Lines before the first `diff --git` are preamble and are discarded
-    }
 
-    // Flush the last section
-    if let Some(path) = current_path {
-        sections.push(FileSection {
-            path,
-            lines: current_lines,
-        });
-    }
+        let stripped = strip_path_n(&unquoted, n);
 
-    // Handle patches without `diff --git` headers (traditional unified diffs).
-    // These are treated as a single file section.
-    if sections.is_empty()
-        && !content.trim().is_empty()
-        && let Some(path) = extract_path_from_traditional_diff(content)
-    {
-        sections.push(FileSection {
-            path,
-            lines: content.lines().map(String::from).collect(),
-        });
-    }
+        if needs_quoting(&stripped) {
+            c_quote(&stripped).into_bytes()
+        } else {
+            stripped.into_bytes()
+        }
+    } else {
+        // Unquoted path
+        // Don't strip /dev/null
+        if s == "/dev/null" {
+            return path.to_vec();
+        }
 
-    sections
+        let stripped = strip_path_n(&s, n);
+        stripped.into_bytes()
+    }
+}
+
+/// Strip N path components from a file path.
+///
+/// For example, `strip_path_n("a/path/to/file", 1)` returns "path/to/file",
+/// removing the smallest prefix containing 1 leading slash.
+fn strip_path_n(path: &str, n: usize) -> String {
+    let mut result = path;
+    for _ in 0..n {
+        if let Some(idx) = result.find('/') {
+            result = &result[idx + 1..];
+        } else {
+            // No more slashes to strip
+            break;
+        }
+    }
+    result.to_string()
 }
 
 /// Unquote a C-style (ANSI-C) quoted path using git's quoting rules,
@@ -211,261 +296,9 @@ fn c_quote(path: &str) -> String {
     result
 }
 
-/// Parse old and new paths from a `diff --git` line's content after the prefix.
-///
-/// Handles both unquoted format (`a/old b/new`) and quoted format
-/// (`"a/old path" "b/new path"`). Returns `(old_path, new_path)` with
-/// `a/` and `b/` prefixes still attached.
-fn parse_git_diff_paths(rest: &str) -> Option<(String, String)> {
-    let rest = rest.trim();
-    if rest.starts_with('"') {
-        // Quoted format: "a/old path" "b/new path"
-        // Use gix-quote to parse ANSI-C quoted paths
-        let (old_path, consumed) = ansi_c_unquote(rest)?;
-        let remaining = rest.get(consumed..)?.trim();
-        let (new_path, _) = ansi_c_unquote(remaining)?;
-        Some((old_path, new_path))
-    } else {
-        // Unquoted format: <prefix>/old_path <prefix>/new_path
-        // Git diff prefixes can be arbitrary strings set via
-        // --src-prefix / --dst-prefix (e.g. "a/", "b/", "origin/",
-        // "modified/", or even empty with --no-prefix).
-        // Find the separator between old and new paths by looking for
-        // a space followed by a non-space character — the space is the
-        // delimiter between the two path tokens in unquoted mode.
-        let sep = rest.find(' ')?;
-        let old_path = &rest[..sep];
-        let new_path = &rest[sep + 1..]; // skip the space
-        Some((old_path.to_string(), new_path.to_string()))
-    }
-}
-
-/// Extract the file path from a `diff --git <prefix>/old <prefix>/new` line.
-///
-/// Returns the **old path with prefix** (e.g. `a/src/file.rs`,
-/// `origin/src/file.rs`), matching how `lsdiff` reports paths for
-/// use in `sort -u` ordering within the nixpkgs fetchpatch pipeline.
-fn parse_diff_git_path(line: &str) -> Option<String> {
-    let line = line.trim();
-    let rest = line.strip_prefix("diff --git ")?;
-    let (old_path, _new_path) = parse_git_diff_paths(rest)?;
-    Some(old_path)
-}
-
-/// Extract the file path from a traditional unified diff (no `diff --git` header).
-///
-/// Returns the path **with its diff prefix** (e.g. `b/src/file.rs`),
-/// matching the `lsdiff`-style sort key convention used by
-/// `parse_diff_git_path`.
-fn extract_path_from_traditional_diff(content: &str) -> Option<String> {
-    for line in content.lines() {
-        let line = line.trim();
-        if let Some(rest) = line.strip_prefix("+++ ") {
-            // Check for C-style quoted path
-            let path = if rest.starts_with('"') {
-                let (unquoted, _) = ansi_c_unquote(rest)?;
-                unquoted
-            } else {
-                // Remove timestamp if present (tab-separated)
-                rest.split('\t').next().unwrap_or(rest).to_string()
-            };
-            // Return path with prefix (matching lsdiff sort key convention)
-            return Some(path);
-        }
-    }
-    None
-}
-
-/// Clean a section's lines in place by removing:
-/// - `diff --git` headers (contain variable commit SHAs)
-/// - `index` lines (git diff header index lines that contain variable hashes)
-/// - `new file mode` and `deleted file mode` lines (contain file mode bits)
-/// - Binary file markers and `GIT binary patch` lines
-/// - Function/context text from hunk headers (the text after `@@ ... @@`)
-/// - Empty hunks (hunks with only context lines, no additions or deletions)
-fn clean_section(lines: &mut Vec<String>) {
-    // Remove diff --git headers, index lines, file mode lines, and
-    // binary markers. The nixpkgs fetchpatch normalization strips these
-    // because they contain variable content (index hashes, git commit
-    // SHAs, file mode bits) that would make the hash non-deterministic.
-    lines.retain(|line| {
-        let trimmed = line.trim();
-        !trimmed.starts_with("diff --git ")
-            && !trimmed.starts_with("index ")
-            && !trimmed.starts_with("new file mode ")
-            && !trimmed.starts_with("deleted file mode ")
-            && !trimmed.starts_with("Binary files ")
-            && !trimmed.starts_with("GIT binary patch")
-    });
-
-    // Strip function/context text from hunk headers.
-    // `filterdiff --clean` removes the text after `@@ -l,s +l,s @@`,
-    // e.g. `@@ -52,7 +52,7 @@ some context` becomes `@@ -52,7 +52,7 @@`.
-    for line in lines.iter_mut() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("@@") {
-            // Find the closing @@ of the hunk header.
-            // Format: @@ -l,s +l,s @@ optional context
-            // Skip the opening "@@" (2 chars) and find the next "@@".
-            if let Some(pos) = rest.find("@@") {
-                let end_pos = 2 + pos + 2; // position after the closing "@@"
-                *line = trimmed[..end_pos].to_string();
-            }
-        }
-    }
-
-    // Remove empty hunks
-    remove_empty_hunks(lines);
-}
-
-/// Remove hunks that have no added or deleted lines (only context lines).
-fn remove_empty_hunks(lines: &mut Vec<String>) {
-    let mut result = Vec::new();
-    let mut i = 0;
-    while i < lines.len() {
-        let line = lines[i].trim();
-        if line.starts_with("@@") {
-            // Start of a hunk; collect all lines until the next hunk or section end
-            let hunk_start = result.len();
-            result.push(lines[i].clone());
-            i += 1;
-            let mut has_changes = false;
-            while i < lines.len() {
-                let l = lines[i].trim();
-                if l.starts_with("@@") || l.starts_with("diff --git ") {
-                    break;
-                }
-                if l.starts_with('+') || l.starts_with('-') {
-                    has_changes = true;
-                }
-                result.push(lines[i].clone());
-                i += 1;
-            }
-            if !has_changes {
-                // Remove the empty hunk
-                result.truncate(hunk_start);
-            }
-        } else {
-            result.push(lines[i].clone());
-            i += 1;
-        }
-    }
-    *lines = result;
-}
-
-/// Check if a section has at least one hunk.
-fn has_hunk(lines: &[String]) -> bool {
-    lines.iter().any(|line| line.trim().starts_with("@@"))
-}
-
-/// Strip path components in a single line.
-///
-/// This handles:
-/// - `--- a/path` lines (with optional tab-separated timestamp)
-/// - `+++ b/path` lines (with optional tab-separated timestamp)
-/// - `--- /dev/null` and `+++ /dev/null` lines (not stripped)
-fn strip_path_components_in_line(line: &str, n: usize) -> String {
-    if n == 0 {
-        return line.to_string();
-    }
-
-    let trimmed = line.trim();
-
-    if let Some(rest) = trimmed.strip_prefix("diff --git ") {
-        // Format: "diff --git a/old_path b/new_path" or
-        //         "diff --git "a/path with spaces" "b/path with spaces""
-        let (old_path, new_path) = match parse_git_diff_paths(rest) {
-            Some(paths) => paths,
-            None => return line.to_string(),
-        };
-        let stripped_old = strip_path_n(&old_path, n);
-        let stripped_new = strip_path_n(&new_path, n);
-        if needs_quoting(&stripped_old) || needs_quoting(&stripped_new) {
-            format!(
-                "diff --git {} {}",
-                c_quote(&stripped_old),
-                c_quote(&stripped_new)
-            )
-        } else {
-            format!("diff --git {} {}", stripped_old, stripped_new)
-        }
-    } else if trimmed.starts_with("--- ") || trimmed.starts_with("+++ ") {
-        let prefix_len = 4; // "--- " or "+++ "
-        let (prefix, path_and_rest) = trimmed.split_at(prefix_len);
-        // Check for C-style quoted path
-        if path_and_rest.starts_with('"') {
-            let (path, consumed) = match ansi_c_unquote(path_and_rest) {
-                Some(result) => result,
-                None => return line.to_string(),
-            };
-            // Don't strip /dev/null
-            if path == "/dev/null" {
-                return line.to_string();
-            }
-            let stripped = strip_path_n(&path, n);
-            // Reconstruct with original prefix, any text after the quoted path, and re-quoting if needed
-            let after_quote = path_and_rest.get(consumed..).unwrap_or("");
-            if needs_quoting(&stripped) {
-                format!("{}{}{}", prefix, c_quote(&stripped), after_quote)
-            } else {
-                format!("{}{}{}", prefix, stripped, after_quote)
-            }
-        } else {
-            // Unquoted path: split on tab to separate path from timestamp
-            let path = path_and_rest.split('\t').next().unwrap_or(path_and_rest);
-            // Don't strip /dev/null
-            if path == "/dev/null" {
-                return line.to_string();
-            }
-            let stripped = strip_path_n(path, n);
-            // Reconstruct with original prefix and any timestamp
-            if let Some(tab_idx) = path_and_rest.find('\t') {
-                let timestamp = &path_and_rest[tab_idx..];
-                format!("{}{}{}", prefix, stripped, timestamp)
-            } else {
-                format!("{}{}", prefix, stripped)
-            }
-        }
-    } else {
-        line.to_string()
-    }
-}
-
-/// Strip N path components from a file path.
-///
-/// For example, `strip_path_n("a/path/to/file", 1)` returns "path/to/file",
-/// removing the smallest prefix containing 1 leading slash.
-fn strip_path_n(path: &str, n: usize) -> String {
-    let mut result = path;
-    for _ in 0..n {
-        if let Some(idx) = result.find('/') {
-            result = &result[idx + 1..];
-        } else {
-            // No more slashes to strip
-            break;
-        }
-    }
-    result.to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_parse_diff_git_path() {
-        // Returns old path with prefix (lsdiff convention for sort key)
-        assert_eq!(
-            parse_diff_git_path("diff --git a/src/main.rs b/src/main.rs"),
-            Some("a/src/main.rs".to_string())
-        );
-        assert_eq!(
-            parse_diff_git_path("diff --git a/README.md b/README.md"),
-            Some("a/README.md".to_string())
-        );
-        assert_eq!(parse_diff_git_path("some other line"), None);
-        assert_eq!(parse_diff_git_path(""), None);
-    }
 
     #[test]
     fn test_strip_path_n() {
@@ -478,46 +311,30 @@ mod tests {
     }
 
     #[test]
-    fn test_strip_path_components_in_line() {
+    fn test_strip_path_bytes() {
+        // Unquoted path
+        assert_eq!(strip_path_bytes(b"a/src/main.rs", 1), b"src/main.rs");
+        assert_eq!(strip_path_bytes(b"a/src/main.rs", 2), b"main.rs");
+        assert_eq!(strip_path_bytes(b"a/src/main.rs", 3), b"main.rs"); // No more slashes
+        // /dev/null is never stripped
+        assert_eq!(strip_path_bytes(b"/dev/null", 1), b"/dev/null");
+        // Zero strip
+        assert_eq!(strip_path_bytes(b"a/src/main.rs", 0), b"a/src/main.rs");
+        // C-style quoted path with spaces
         assert_eq!(
-            strip_path_components_in_line("diff --git a/src/main.rs b/src/main.rs", 1),
-            "diff --git src/main.rs src/main.rs"
+            strip_path_bytes(b"\"a/path with spaces\"", 1),
+            b"\"path with spaces\""
         );
-        assert_eq!(
-            strip_path_components_in_line("--- a/src/main.rs", 1),
-            "--- src/main.rs"
-        );
-        assert_eq!(
-            strip_path_components_in_line("+++ b/src/main.rs", 1),
-            "+++ src/main.rs"
-        );
-        // /dev/null should not be stripped
-        assert_eq!(
-            strip_path_components_in_line("--- /dev/null", 1),
-            "--- /dev/null"
-        );
-        assert_eq!(
-            strip_path_components_in_line("+++ /dev/null", 1),
-            "+++ /dev/null"
-        );
-        // Timestamps should be preserved
-        assert_eq!(
-            strip_path_components_in_line(
-                "--- a/src/main.rs\t2024-01-01 00:00:00.000000000 +0000",
-                1
-            ),
-            "--- src/main.rs\t2024-01-01 00:00:00.000000000 +0000"
-        );
-        // Zero strip should be identity
-        assert_eq!(
-            strip_path_components_in_line("diff --git a/file b/file", 0),
-            "diff --git a/file b/file"
-        );
-        // Non-path lines should be unchanged
-        assert_eq!(
-            strip_path_components_in_line("@@ -1,3 +1,3 @@", 1),
-            "@@ -1,3 +1,3 @@"
-        );
+        // C-style quoted /dev/null
+        assert_eq!(strip_path_bytes(b"\"/dev/null\"", 1), b"\"/dev/null\"");
+        // C-style quoted path that doesn't need quoting after stripping
+        assert_eq!(strip_path_bytes(b"\"a/simple\"", 1), b"simple");
+        // Mnemonic prefixes
+        assert_eq!(strip_path_bytes(b"i/file.txt", 1), b"file.txt");
+        assert_eq!(strip_path_bytes(b"w/file.txt", 1), b"file.txt");
+        // Multi-character prefixes
+        assert_eq!(strip_path_bytes(b"origin/file.txt", 1), b"file.txt");
+        assert_eq!(strip_path_bytes(b"modified/file.txt", 1), b"file.txt");
     }
 
     #[test]
@@ -931,138 +748,6 @@ diff --git a/file.txt b/file.txt
         // Round-trip: c_quote(ansi_c_unquote(x)) for a quoted path with spaces
         let (unquoted, _) = ansi_c_unquote("\"path with spaces\"").unwrap();
         assert_eq!(c_quote(&unquoted), "\"path with spaces\"");
-    }
-
-    #[test]
-    fn test_parse_git_diff_paths() {
-        // Unquoted paths with default a/b prefixes
-        assert_eq!(
-            parse_git_diff_paths("a/src/main.rs b/src/main.rs"),
-            Some(("a/src/main.rs".to_string(), "b/src/main.rs".to_string()))
-        );
-        // Unquoted paths with mnemonic prefixes (diff.mnemonicprefix)
-        assert_eq!(
-            parse_git_diff_paths("i/src/main.rs w/src/main.rs"),
-            Some(("i/src/main.rs".to_string(), "w/src/main.rs".to_string()))
-        );
-        // Committed vs worktree mnemonic prefixes
-        assert_eq!(
-            parse_git_diff_paths("c/src/main.rs w/src/main.rs"),
-            Some(("c/src/main.rs".to_string(), "w/src/main.rs".to_string()))
-        );
-        // Origin vs side1 merge prefixes
-        assert_eq!(
-            parse_git_diff_paths("o/src/main.rs 1/src/main.rs"),
-            Some(("o/src/main.rs".to_string(), "1/src/main.rs".to_string()))
-        );
-        // Multi-character custom prefixes (--src-prefix/--dst-prefix)
-        assert_eq!(
-            parse_git_diff_paths("origin/src/main.rs modified/src/main.rs"),
-            Some((
-                "origin/src/main.rs".to_string(),
-                "modified/src/main.rs".to_string()
-            ))
-        );
-        // Quoted paths with spaces
-        assert_eq!(
-            parse_git_diff_paths("\"a/path with spaces\" \"b/path with spaces\""),
-            Some((
-                "a/path with spaces".to_string(),
-                "b/path with spaces".to_string()
-            ))
-        );
-        // Quoted paths with escape sequences (\\ -> \)
-        assert_eq!(
-            parse_git_diff_paths("\"a/path\\\\quote\" \"b/path\\\\quote\""),
-            Some(("a/path\\quote".to_string(), "b/path\\quote".to_string()))
-        );
-    }
-
-    #[test]
-    fn test_parse_diff_git_path_with_spaces() {
-        // Standard a/b prefixes — returns old path with prefix (lsdiff convention)
-        assert_eq!(
-            parse_diff_git_path("diff --git a/src/main.rs b/src/main.rs"),
-            Some("a/src/main.rs".to_string())
-        );
-        // Mnemonic prefixes (i/w for index vs worktree)
-        assert_eq!(
-            parse_diff_git_path("diff --git i/src/main.rs w/src/main.rs"),
-            Some("i/src/main.rs".to_string())
-        );
-        // Committed vs worktree mnemonic prefixes (c/w)
-        assert_eq!(
-            parse_diff_git_path("diff --git c/src/main.rs w/src/main.rs"),
-            Some("c/src/main.rs".to_string())
-        );
-        // Multi-character custom prefixes (--src-prefix/--dst-prefix)
-        assert_eq!(
-            parse_diff_git_path("diff --git origin/src/main.rs modified/src/main.rs"),
-            Some("origin/src/main.rs".to_string())
-        );
-        // Quoted path with spaces
-        assert_eq!(
-            parse_diff_git_path("diff --git \"a/path with spaces\" \"b/path with spaces\""),
-            Some("a/path with spaces".to_string())
-        );
-        // No match for non-diff lines
-        assert_eq!(parse_diff_git_path("some other line"), None);
-    }
-
-    #[test]
-    fn test_strip_path_components_in_line_quoted() {
-        // Quoted path in diff --git header
-        assert_eq!(
-            strip_path_components_in_line(
-                "diff --git \"a/path with spaces\" \"b/path with spaces\"",
-                1
-            ),
-            "diff --git \"path with spaces\" \"path with spaces\""
-        );
-        // Unquoted path (no spaces) remains unquoted
-        assert_eq!(
-            strip_path_components_in_line("diff --git a/src/main.rs b/src/main.rs", 1),
-            "diff --git src/main.rs src/main.rs"
-        );
-        // Quoted path in --- line
-        assert_eq!(
-            strip_path_components_in_line("--- \"a/path with spaces\"", 1),
-            "--- \"path with spaces\""
-        );
-        // Quoted path in +++ line
-        assert_eq!(
-            strip_path_components_in_line("+++ \"b/path with spaces\"", 1),
-            "+++ \"path with spaces\""
-        );
-        // Quoted path with timestamp in --- line
-        assert_eq!(
-            strip_path_components_in_line("--- \"a/path with spaces\"\t2024-01-01", 1),
-            "--- \"path with spaces\"\t2024-01-01"
-        );
-        // Quoted /dev/null should not be stripped
-        assert_eq!(
-            strip_path_components_in_line("--- \"/dev/null\"", 1),
-            "--- \"/dev/null\""
-        );
-    }
-
-    #[test]
-    fn test_extract_path_from_traditional_diff_quoted() {
-        // Unquoted +++ line — returns path with prefix (lsdiff convention)
-        assert_eq!(
-            extract_path_from_traditional_diff("+++ b/src/main.rs\n"),
-            Some("b/src/main.rs".to_string())
-        );
-        // Quoted +++ line with spaces
-        assert_eq!(
-            extract_path_from_traditional_diff("+++ \"b/path with spaces\"\n"),
-            Some("b/path with spaces".to_string())
-        );
-        // Quoted +++ line with timestamp
-        assert_eq!(
-            extract_path_from_traditional_diff("+++ \"b/path with spaces\"\t2024-01-01\n"),
-            Some("b/path with spaces".to_string())
-        );
     }
 
     #[test]
