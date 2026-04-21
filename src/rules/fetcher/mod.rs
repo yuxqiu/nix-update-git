@@ -88,6 +88,16 @@ pub(crate) const OPERATIONAL_KEYS: &[&str] = &[
     "fetchLFS",
     "branchName",
     "rootDir",
+    "stripLen",
+    "relative",
+    "extraPrefix",
+    "excludes",
+    "includes",
+    "hunks",
+    "revert",
+    "decode",
+    "postFetch",
+    "nativeBuildInputs",
 ];
 
 /// Specifies which fetcher attribute fields are allowed to contain
@@ -181,6 +191,12 @@ pub(crate) struct FetcherAttrs {
     pub interpolated_unresolved: Vec<String>,
     /// Items from the `sparseCheckout` list attribute.
     pub sparse_checkout: Vec<String>,
+    /// Items from the `excludes` list attribute.
+    pub excludes: Vec<String>,
+    /// Items from the `includes` list attribute.
+    pub includes: Vec<String>,
+    /// Items from the `hunks` list attribute (1-based indices).
+    pub hunks: Vec<usize>,
 }
 
 /// Parse the attribute set of a fetcher call into structured fields.
@@ -197,6 +213,9 @@ pub(crate) fn parse_fetcher_attrset(attr_set: &NixNode, spec: &InterpolationSpec
     let mut interpolated = HashMap::new();
     let mut interpolated_unresolved = Vec::new();
     let mut sparse_checkout = Vec::new();
+    let mut excludes = Vec::new();
+    let mut includes = Vec::new();
+    let mut hunks = Vec::new();
 
     for child in attr_set.children() {
         if child.kind() != rnix::SyntaxKind::NODE_ATTRPATH_VALUE {
@@ -248,6 +267,30 @@ pub(crate) fn parse_fetcher_attrset(attr_set: &NixNode, spec: &InterpolationSpec
                         sparse_checkout.push(content);
                     }
                 }
+            } else if key == "excludes" && value.kind() == rnix::SyntaxKind::NODE_LIST {
+                for item in value.children() {
+                    if item.kind() == rnix::SyntaxKind::NODE_STRING
+                        && let Some(content) = item.pure_string_content()
+                    {
+                        excludes.push(content);
+                    }
+                }
+            } else if key == "includes" && value.kind() == rnix::SyntaxKind::NODE_LIST {
+                for item in value.children() {
+                    if item.kind() == rnix::SyntaxKind::NODE_STRING
+                        && let Some(content) = item.pure_string_content()
+                    {
+                        includes.push(content);
+                    }
+                }
+            } else if key == "hunks" && value.kind() == rnix::SyntaxKind::NODE_LIST {
+                for item in value.children() {
+                    if item.kind() == rnix::SyntaxKind::NODE_LITERAL
+                        && let Ok(num) = item.text_trimmed().parse::<usize>()
+                    {
+                        hunks.push(num);
+                    }
+                }
             }
         }
     }
@@ -258,6 +301,9 @@ pub(crate) fn parse_fetcher_attrset(attr_set: &NixNode, spec: &InterpolationSpec
         interpolated,
         interpolated_unresolved,
         sparse_checkout,
+        excludes,
+        includes,
+        hunks,
     }
 }
 
@@ -268,6 +314,9 @@ struct FetcherCall {
     pinned: bool,
     follow_branch: Option<String>,
     sparse_checkout: Vec<String>,
+    excludes: Vec<String>,
+    includes: Vec<String>,
+    hunks: Vec<usize>,
 }
 
 #[derive(Default)]
@@ -307,6 +356,9 @@ impl FetcherRule {
             pinned,
             follow_branch,
             sparse_checkout: attrs.sparse_checkout,
+            excludes: attrs.excludes,
+            includes: attrs.includes,
+            hunks: attrs.hunks,
         })
     }
 
@@ -440,19 +492,48 @@ impl FetcherRule {
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
 
+        let relative = call.params.get("relative").cloned();
+        let extra_prefix = call.params.get("extraPrefix").cloned();
+        let revert = call.params.get("revert") == Some(&"true".to_string());
+
+        // If postFetch is set (non-empty), we can't compute the hash
+        // because it's arbitrary shell code that may modify the output.
+        let has_post_fetch = call.params.get("postFetch").is_some_and(|p| !p.is_empty());
+
+        // If decode is not "cat" (or absent), we can't compute the hash
+        // unless we natively support the decode command. Currently we
+        // only support the default ("cat" / absent).
+        let decode = call
+            .params
+            .get("decode")
+            .cloned()
+            .unwrap_or_else(|| "cat".to_string());
+        let can_decode = decode == "cat";
+
         // Compute / recompute hash when:
         // 1. URL changed (need to re-hash the new URL content), or
         // 2. hash / sha256 is empty (fill it in).
-        let needs_hash = url_changed
+        let needs_hash = (url_changed
             || call.params.get("hash").is_some_and(|h| h.is_empty())
-            || call.params.get("sha256").is_some_and(|h| h.is_empty());
+            || call.params.get("sha256").is_some_and(|h| h.is_empty()))
+            && !has_post_fetch
+            && can_decode;
 
         if needs_hash {
             let has_hash_source = call.source_ranges.contains_key("hash")
                 || call.source_ranges.contains_key("sha256");
 
             if has_hash_source {
-                let result = crate::utils::PatchHasher::hash_patch_url(&current_url, strip_len);
+                let options = crate::utils::PatchOptions {
+                    strip_len,
+                    relative,
+                    extra_prefix,
+                    excludes: call.excludes.clone(),
+                    includes: call.includes.clone(),
+                    hunks: call.hunks.clone(),
+                    revert,
+                };
+                let result = crate::utils::PatchHasher::hash_patch_url(&current_url, &options);
                 match result {
                     Ok(nar_hash) => {
                         if let Some(range) = call.source_ranges.get("hash") {

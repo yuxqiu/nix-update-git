@@ -41,6 +41,7 @@ tempfile = { workspace = true }
 nix-prefetch-git = { path = "nix-prefetch-git" }
 gix-quote = "0.7"
 bstr = "1"
+globset = "0.4"
 
 [features]
 network-tests = []
