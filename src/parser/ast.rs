@@ -1,5 +1,6 @@
 use rowan::ast::AstNode;
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -326,6 +327,218 @@ impl NixNode {
         }
     }
 
+    pub fn parse_attrs(
+        &self,
+        spec: &[AttrSpec],
+        ident_vars: Option<&HashMap<String, String>>,
+    ) -> ParsedAttrs {
+        if self.kind() != rnix::SyntaxKind::NODE_ATTR_SET {
+            return ParsedAttrs::default();
+        }
+
+        let known_keys: HashMap<&str, &AttrType> =
+            spec.iter().map(|s| (s.key, &s.attr_type)).collect();
+
+        let mut strings: HashMap<String, String> = HashMap::new();
+        let mut bools: HashMap<String, bool> = HashMap::new();
+        let mut ints: HashMap<String, i64> = HashMap::new();
+        let mut list_strings: HashMap<String, Vec<String>> = HashMap::new();
+        let mut list_ints: HashMap<String, Vec<i64>> = HashMap::new();
+        let mut source_ranges: HashMap<String, TextRange> = HashMap::new();
+        let mut string_nodes: HashMap<String, NixNode> = HashMap::new();
+        let mut unknown_keys: Vec<String> = Vec::new();
+        let mut type_mismatches: Vec<(String, AttrType, String)> = Vec::new();
+
+        for child in self.children() {
+            if child.kind() != rnix::SyntaxKind::NODE_ATTRPATH_VALUE {
+                continue;
+            }
+            let segments = child.attrpath_segments();
+            if segments.len() != 1 {
+                continue;
+            }
+            let key = segments[0].clone();
+            let Some(value) = child.attr_value() else {
+                continue;
+            };
+
+            match known_keys.get(key.as_str()) {
+                Some(attr_type) => {
+                    let actual_kind = value.kind();
+                    match attr_type {
+                        AttrType::String => {
+                            if actual_kind == rnix::SyntaxKind::NODE_STRING {
+                                let range = value.text_range();
+                                source_ranges.insert(key.clone(), range);
+                                string_nodes.insert(key.clone(), value.clone());
+                                if let Some(content) = value.pure_string_content() {
+                                    strings.insert(key, content);
+                                }
+                            } else if actual_kind == rnix::SyntaxKind::NODE_IDENT {
+                                let trimmed = value.text_trimmed();
+                                if trimmed == "true" || trimmed == "false" {
+                                    type_mismatches.push((
+                                        key,
+                                        AttrType::String,
+                                        "bool".to_string(),
+                                    ));
+                                } else if let Some(iv) = ident_vars
+                                    && let Some(resolved) = iv.get(trimmed.as_str())
+                                {
+                                    strings.insert(key, resolved.clone());
+                                } else {
+                                    type_mismatches.push((
+                                        key,
+                                        AttrType::String,
+                                        format!("ident '{}'", trimmed),
+                                    ));
+                                }
+                            } else {
+                                type_mismatches.push((
+                                    key,
+                                    AttrType::String,
+                                    format!("{:?}", actual_kind),
+                                ));
+                            }
+                        }
+                        AttrType::Bool => {
+                            if actual_kind == rnix::SyntaxKind::NODE_IDENT {
+                                let trimmed = value.text_trimmed();
+                                match trimmed.as_str() {
+                                    "true" => {
+                                        bools.insert(key, true);
+                                    }
+                                    "false" => {
+                                        bools.insert(key, false);
+                                    }
+                                    _ => {
+                                        type_mismatches.push((
+                                            key,
+                                            AttrType::Bool,
+                                            format!("ident '{}'", trimmed),
+                                        ));
+                                    }
+                                }
+                            } else {
+                                type_mismatches.push((
+                                    key,
+                                    AttrType::Bool,
+                                    format!("{:?}", actual_kind),
+                                ));
+                            }
+                        }
+                        AttrType::Int => {
+                            if actual_kind == rnix::SyntaxKind::NODE_LITERAL {
+                                let trimmed = value.text_trimmed();
+                                if let Ok(num) = trimmed.parse::<i64>() {
+                                    let range = value.text_range();
+                                    source_ranges.insert(key.clone(), range);
+                                    ints.insert(key, num);
+                                } else {
+                                    type_mismatches.push((
+                                        key,
+                                        AttrType::Int,
+                                        "non-numeric literal".to_string(),
+                                    ));
+                                }
+                            } else {
+                                type_mismatches.push((
+                                    key,
+                                    AttrType::Int,
+                                    format!("{:?}", actual_kind),
+                                ));
+                            }
+                        }
+                        AttrType::ListString => {
+                            if actual_kind == rnix::SyntaxKind::NODE_LIST {
+                                let mut items = Vec::new();
+                                for item in value.children() {
+                                    if item.kind() == rnix::SyntaxKind::NODE_STRING
+                                        && let Some(content) = item.pure_string_content()
+                                    {
+                                        items.push(content);
+                                    }
+                                }
+                                list_strings.insert(key, items);
+                            } else {
+                                type_mismatches.push((
+                                    key,
+                                    AttrType::ListString,
+                                    format!("{:?}", actual_kind),
+                                ));
+                            }
+                        }
+                        AttrType::ListInt => {
+                            if actual_kind == rnix::SyntaxKind::NODE_LIST {
+                                let mut items = Vec::new();
+                                for item in value.children() {
+                                    if item.kind() == rnix::SyntaxKind::NODE_LITERAL
+                                        && let Ok(num) = item.text_trimmed().parse::<i64>()
+                                    {
+                                        items.push(num);
+                                    }
+                                }
+                                list_ints.insert(key, items);
+                            } else {
+                                type_mismatches.push((
+                                    key,
+                                    AttrType::ListInt,
+                                    format!("{:?}", actual_kind),
+                                ));
+                            }
+                        }
+                    }
+                }
+                None => {
+                    // Unknown key: try to parse as string for maximum
+                    // compatibility, but still report it as unknown.
+                    if value.kind() == rnix::SyntaxKind::NODE_STRING {
+                        let range = value.text_range();
+                        source_ranges.insert(key.clone(), range);
+                        string_nodes.insert(key.clone(), value.clone());
+                        if let Some(content) = value.pure_string_content() {
+                            strings.insert(key.clone(), content);
+                        }
+                    } else if value.kind() == rnix::SyntaxKind::NODE_IDENT {
+                        let trimmed = value.text_trimmed();
+                        if trimmed == "true" {
+                            bools.insert(key.clone(), true);
+                        } else if trimmed == "false" {
+                            bools.insert(key.clone(), false);
+                        }
+                    }
+                    unknown_keys.push(key);
+                }
+            }
+        }
+
+        if !unknown_keys.is_empty() {
+            eprintln!(
+                "Warning: unexpected keys in attrset: {}",
+                unknown_keys.join(", ")
+            );
+        }
+
+        for (key, expected, actual_desc) in &type_mismatches {
+            eprintln!(
+                "Warning: key \"{}\" expected {} but found {}",
+                key, expected, actual_desc
+            );
+        }
+
+        ParsedAttrs {
+            strings,
+            bools,
+            ints,
+            list_strings,
+            list_ints,
+            source_ranges,
+            string_nodes,
+            unknown_keys,
+            type_mismatches,
+        }
+    }
+
     pub fn parent(&self) -> Option<NixNode> {
         self.node
             .parent()
@@ -413,6 +626,46 @@ impl NixNode {
 pub struct TextRange {
     pub start: usize,
     pub end: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AttrType {
+    String,
+    Bool,
+    Int,
+    ListString,
+    ListInt,
+}
+
+impl fmt::Display for AttrType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AttrType::String => write!(f, "string"),
+            AttrType::Bool => write!(f, "bool"),
+            AttrType::Int => write!(f, "int"),
+            AttrType::ListString => write!(f, "list of strings"),
+            AttrType::ListInt => write!(f, "list of ints"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttrSpec {
+    pub key: &'static str,
+    pub attr_type: AttrType,
+}
+
+#[derive(Debug, Default)]
+pub struct ParsedAttrs {
+    pub strings: HashMap<String, String>,
+    pub bools: HashMap<String, bool>,
+    pub ints: HashMap<String, i64>,
+    pub list_strings: HashMap<String, Vec<String>>,
+    pub list_ints: HashMap<String, Vec<i64>>,
+    pub source_ranges: HashMap<String, TextRange>,
+    pub string_nodes: HashMap<String, NixNode>,
+    pub unknown_keys: Vec<String>,
+    pub type_mismatches: Vec<(String, AttrType, String)>,
 }
 
 #[derive(Debug)]

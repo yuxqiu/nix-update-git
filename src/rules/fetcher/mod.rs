@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 
-use crate::parser::{NixNode, TextRange};
+use crate::parser::{NixNode, ParsedAttrs};
 use crate::rules::traits::{Update, UpdateRule};
 use crate::utils::{GitFetcher, NarHash, VersionDetector};
 
@@ -19,18 +19,18 @@ pub(crate) fn is_commit_hash(s: &str) -> bool {
 
 pub(crate) fn version_ref_key_and_value(
     kind: FetcherKind,
-    params: &HashMap<String, String>,
+    parsed: &ParsedAttrs,
 ) -> Option<(&'static str, String)> {
-    if let Some(tag) = params.get("tag") {
+    if let Some(tag) = parsed.strings.get("tag") {
         return Some(("tag", tag.clone()));
     }
-    if let Some(rev) = params.get("rev") {
+    if let Some(rev) = parsed.strings.get("rev") {
         if is_commit_hash(rev) || !VersionDetector::is_version(rev) {
             return None;
         }
         return Some(("rev", rev.clone()));
     }
-    if let Some(ref_val) = params.get("ref")
+    if let Some(ref_val) = parsed.strings.get("ref")
         && kind == FetcherKind::BuiltinsFetchGit
     {
         if is_commit_hash(ref_val) || !VersionDetector::is_version(ref_val) {
@@ -41,86 +41,32 @@ pub(crate) fn version_ref_key_and_value(
     None
 }
 
-pub(crate) fn preferred_ref_key(params: &HashMap<String, String>) -> Option<&'static str> {
-    if params.contains_key("tag") {
+pub(crate) fn preferred_ref_key(parsed: &ParsedAttrs) -> Option<&'static str> {
+    if parsed.strings.contains_key("tag") {
         Some("tag")
-    } else if params.contains_key("rev") {
+    } else if parsed.strings.contains_key("rev") {
         Some("rev")
-    } else if params.contains_key("ref") {
+    } else if parsed.strings.contains_key("ref") {
         Some("ref")
     } else {
         None
     }
 }
 
-/// Resolve a ref value to a revision suitable for prefetching.
-///
-/// Currently returns the ref as-is for non-empty values (commit hashes
-/// and symbolic refs like tags are passed through unchanged). The
-/// `git_url` parameter is reserved for future use where symbolic refs
-/// may be resolved to commit SHAs via `git ls-remote`.
 pub(crate) fn resolve_ref_for_prefetch(_git_url: &str, ref_value: &str) -> Option<String> {
     if ref_value.is_empty() {
         return None;
     }
     Some(ref_value.to_string())
 }
-/// Keys that affect version resolution, URL construction, or hash
-/// computation in a fetcher call. If any of these are interpolated
-/// and not permitted by the `InterpolationSpec`, we conservatively
-/// skip the call.
-pub(crate) const OPERATIONAL_KEYS: &[&str] = &[
-    "url",
-    "owner",
-    "repo",
-    "domain",
-    "githubBase",
-    "vc",
-    "tag",
-    "rev",
-    "ref",
-    "hash",
-    "sha256",
-    "fetchSubmodules",
-    "submodules",
-    "deepClone",
-    "leaveDotGit",
-    "fetchLFS",
-    "branchName",
-    "rootDir",
-    "stripLen",
-    "relative",
-    "extraPrefix",
-    "excludes",
-    "includes",
-    "hunks",
-    "revert",
-    "decode",
-    "postFetch",
-    "nativeBuildInputs",
-];
 
-/// Specifies which fetcher attribute fields are allowed to contain
-/// string interpolation, and what variable bindings are available
-/// for resolution verification.
 pub(crate) struct InterpolationSpec {
-    /// Map from field name to variable bindings.
-    /// E.g., `{"rev": {"version": "1.0.0"}}` means the `rev` field
-    /// may use `${version}` interpolation.
     allowed: HashMap<String, HashMap<String, String>>,
-    /// When set, any field may use these variable bindings for
-    /// interpolation. Field-specific `allowed` entries take
-    /// precedence (their variables are merged on top of
-    /// `allow_all_vars`).
     allow_all_vars: Option<HashMap<String, String>>,
-    /// Ident-name → string-value bindings for resolving bare ident
-    /// values. E.g., `{"pname": "foo"}` resolves `repo = pname;`
-    /// into `repo = "foo"`.
     ident_vars: HashMap<String, String>,
 }
 
 impl InterpolationSpec {
-    /// Create a spec that does not allow any interpolated fields.
     pub(crate) fn none() -> Self {
         Self {
             allowed: HashMap::new(),
@@ -129,33 +75,18 @@ impl InterpolationSpec {
         }
     }
 
-    /// Allow a specific field to be interpolated with the given
-    /// variable bindings. The parser will verify that the
-    /// interpolation can be fully resolved using these variables
-    /// before accepting the field.
     pub(crate) fn allow(&mut self, field: &str, vars: HashMap<String, String>) {
         self.allowed.insert(field.to_string(), vars);
     }
 
-    /// Allow interpolation in **any** field using the given variable
-    /// bindings. Field-specific `allow()` entries are merged on top
-    /// of these defaults, so their variables supplement or override
-    /// the catch-all set.
     pub(crate) fn allow_all(&mut self, vars: HashMap<String, String>) {
         self.allow_all_vars = Some(vars);
     }
 
-    /// Register ident bindings for bare ident resolution.
-    /// When a fetcher attribute value is a bare identifier (e.g.
-    /// `repo = pname`), the parser will look it up here and, if
-    /// found, treat it as a pure string value.
     pub(crate) fn allow_idents(&mut self, idents: HashMap<String, String>) {
         self.ident_vars = idents;
     }
 
-    /// Look up the effective variable bindings for a field.
-    /// Field-specific entries are merged on top of `allow_all_vars`,
-    /// so callers get the union of both.
     pub(crate) fn vars_for_field(&self, field: &str) -> Option<HashMap<String, String>> {
         match (&self.allow_all_vars, self.allowed.get(field)) {
             (None, None) => None,
@@ -170,153 +101,53 @@ impl InterpolationSpec {
     }
 }
 
-/// Result of parsing a fetcher attrset.
 pub(crate) struct FetcherAttrs {
-    /// Pure (non-interpolated) string values and boolean ident values.
-    pub params: HashMap<String, String>,
-    /// Byte ranges of all string-valued attributes (both pure and
-    /// interpolated).
-    pub source_ranges: HashMap<String, TextRange>,
-    /// Interpolated attributes that matched the `InterpolationSpec`
-    /// (field is allowed and the interpolation can be resolved with
-    /// the given variables). The template node is stored for callers
-    /// that need to extract affixes or re-resolve with different
-    /// variable values.
+    pub parsed: ParsedAttrs,
     pub interpolated: HashMap<String, NixNode>,
-    /// Interpolated attributes that did NOT match the
-    /// `InterpolationSpec` (either the field is not allowed, or the
-    /// interpolation couldn't be resolved with the given variables).
-    /// Only the key names are stored so callers can detect
-    /// unsupported interpolations in operational fields.
     pub interpolated_unresolved: Vec<String>,
-    /// Items from the `sparseCheckout` list attribute.
-    pub sparse_checkout: Vec<String>,
-    /// Items from the `excludes` list attribute.
-    pub excludes: Vec<String>,
-    /// Items from the `includes` list attribute.
-    pub includes: Vec<String>,
-    /// Items from the `hunks` list attribute (1-based indices).
-    pub hunks: Vec<usize>,
 }
 
-/// Parse the attribute set of a fetcher call into structured fields.
-///
-/// The `InterpolationSpec` controls which fields may contain string
-/// interpolation. Fields whose interpolation matches the spec are
-/// stored in `FetcherAttrs::interpolated` with their template nodes.
-/// All other interpolated fields are recorded in
-/// `FetcherAttrs::interpolated_unresolved` so callers can detect
-/// unsupported interpolations (e.g., in operational keys).
-pub(crate) fn parse_fetcher_attrset(attr_set: &NixNode, spec: &InterpolationSpec) -> FetcherAttrs {
-    let mut params = HashMap::new();
-    let mut source_ranges = HashMap::new();
+pub(crate) fn parse_fetcher_attrset(
+    kind: FetcherKind,
+    attr_set: &NixNode,
+    spec: &InterpolationSpec,
+) -> FetcherAttrs {
+    let ident_vars_opt = if spec.ident_vars.is_empty() {
+        None
+    } else {
+        Some(&spec.ident_vars)
+    };
+    let parsed = attr_set.parse_attrs(kind.attr_spec(), ident_vars_opt);
+
     let mut interpolated = HashMap::new();
     let mut interpolated_unresolved = Vec::new();
-    let mut sparse_checkout = Vec::new();
-    let mut excludes = Vec::new();
-    let mut includes = Vec::new();
-    let mut hunks = Vec::new();
 
-    for child in attr_set.children() {
-        if child.kind() != rnix::SyntaxKind::NODE_ATTRPATH_VALUE {
-            continue;
-        }
-        let segments = child.attrpath_segments();
-        if segments.len() != 1 {
-            continue;
-        }
-        let key = segments[0].clone();
-
-        if let Some(value) = child.attr_value() {
-            if value.kind() == rnix::SyntaxKind::NODE_STRING {
-                let range = value.text_range();
-                source_ranges.insert(key.clone(), range);
-
-                if let Some(content) = value.pure_string_content() {
-                    params.insert(key, content);
-                } else if let Some(vars) = spec.vars_for_field(&key) {
-                    if value.interpolated_string_content(&vars).is_some() {
-                        interpolated.insert(key, value);
-                    } else {
-                        interpolated_unresolved.push(key);
-                    }
-                } else {
-                    interpolated_unresolved.push(key);
-                }
-            } else if value.kind() == rnix::SyntaxKind::NODE_IDENT {
-                let trimmed = value.text_trimmed();
-                if trimmed == "true" || trimmed == "false" {
-                    params.insert(key, trimmed);
-                } else if let Some(resolved) = spec.ident_vars.get(&trimmed) {
-                    // Resolve bare ident references (e.g. `repo = pname`)
-                    // using the ident bindings from the spec.
-                    params.insert(key, resolved.clone());
-                }
-            } else if value.kind() == rnix::SyntaxKind::NODE_LITERAL {
-                // Handle integer/float literals (e.g. `stripLen = 1`)
-                // Store the text representation so numeric attributes are
-                // available in params for lookups like stripLen parsing.
-                let range = value.text_range();
-                source_ranges.insert(key.clone(), range);
-                params.insert(key, value.text_trimmed().to_string());
-            } else if key == "sparseCheckout" && value.kind() == rnix::SyntaxKind::NODE_LIST {
-                for item in value.children() {
-                    if item.kind() == rnix::SyntaxKind::NODE_STRING
-                        && let Some(content) = item.pure_string_content()
-                    {
-                        sparse_checkout.push(content);
-                    }
-                }
-            } else if key == "excludes" && value.kind() == rnix::SyntaxKind::NODE_LIST {
-                for item in value.children() {
-                    if item.kind() == rnix::SyntaxKind::NODE_STRING
-                        && let Some(content) = item.pure_string_content()
-                    {
-                        excludes.push(content);
-                    }
-                }
-            } else if key == "includes" && value.kind() == rnix::SyntaxKind::NODE_LIST {
-                for item in value.children() {
-                    if item.kind() == rnix::SyntaxKind::NODE_STRING
-                        && let Some(content) = item.pure_string_content()
-                    {
-                        includes.push(content);
-                    }
-                }
-            } else if key == "hunks" && value.kind() == rnix::SyntaxKind::NODE_LIST {
-                for item in value.children() {
-                    if item.kind() == rnix::SyntaxKind::NODE_LITERAL
-                        && let Ok(num) = item.text_trimmed().parse::<usize>()
-                    {
-                        hunks.push(num);
-                    }
-                }
+    for (key, node) in &parsed.string_nodes {
+        if node.pure_string_content().is_some() {
+            // Already handled by parse_attrs -> strings
+        } else if let Some(vars) = spec.vars_for_field(key) {
+            if node.interpolated_string_content(&vars).is_some() {
+                interpolated.insert(key.clone(), node.clone());
+            } else {
+                interpolated_unresolved.push(key.clone());
             }
+        } else {
+            interpolated_unresolved.push(key.clone());
         }
     }
 
     FetcherAttrs {
-        params,
-        source_ranges,
+        parsed,
         interpolated,
         interpolated_unresolved,
-        sparse_checkout,
-        excludes,
-        includes,
-        hunks,
     }
 }
 
 struct FetcherCall {
     kind: FetcherKind,
-    params: HashMap<String, String>,
-    source_ranges: HashMap<String, TextRange>,
+    parsed: ParsedAttrs,
     pinned: bool,
     follow_branch: Option<String>,
-    sparse_checkout: Vec<String>,
-    excludes: Vec<String>,
-    includes: Vec<String>,
-    hunks: Vec<usize>,
 }
 
 #[derive(Default)]
@@ -332,14 +163,13 @@ impl FetcherRule {
             return None;
         }
 
-        let attrs = parse_fetcher_attrset(&arg, &InterpolationSpec::none());
+        let op_keys = kind.operational_keys();
+        let attrs = parse_fetcher_attrset(kind, &arg, &InterpolationSpec::none());
 
-        // Conservatively skip if any operational key is interpolated
-        // but not permitted by the spec (which is empty here).
         if attrs
             .interpolated_unresolved
             .iter()
-            .any(|k| OPERATIONAL_KEYS.contains(&k.as_str()))
+            .any(|k| op_keys.contains(&k.as_str()))
         {
             return None;
         }
@@ -351,19 +181,14 @@ impl FetcherRule {
 
         Some(FetcherCall {
             kind,
-            params: attrs.params,
-            source_ranges: attrs.source_ranges,
+            parsed: attrs.parsed,
             pinned,
             follow_branch,
-            sparse_checkout: attrs.sparse_checkout,
-            excludes: attrs.excludes,
-            includes: attrs.includes,
-            hunks: attrs.hunks,
         })
     }
 
     fn check_fetcher_call(&self, call: &FetcherCall) -> Result<Option<Vec<Update>>> {
-        let git_url = match call.kind.git_url(&call.params) {
+        let git_url = match call.kind.git_url(&call.parsed) {
             Some(url) => url,
             None => return Ok(None),
         };
@@ -371,7 +196,6 @@ impl FetcherRule {
         let mut updates = Vec::new();
         let mut version_updated_rev: Option<String> = None;
 
-        // Case 1: not pinned -> check version update
         if !call.pinned {
             if let Some(branch) = &call.follow_branch {
                 version_updated_rev =
@@ -381,7 +205,6 @@ impl FetcherRule {
             }
         }
 
-        // Case 2: update hash if needed
         if call.kind.needs_hash() {
             if let Some(rev) = &version_updated_rev {
                 Self::try_prefetch_hash(call, rev, &mut updates);
@@ -397,26 +220,8 @@ impl FetcherRule {
         }
     }
 
-    /// Handle a fetchpatch call: revision following, version updates,
-    /// and empty-hash filling.
-    ///
-    /// Three cases are handled:
-    ///
-    /// 1. **`# follow:<branch>`** — when the fetchpatch has a follow
-    ///    comment, parse the URL to identify the hosting platform and
-    ///    extract the current ref, then query `git ls-remote` for the
-    ///    latest commit on the specified branch.  The ref in the URL is
-    ///    replaced with the new SHA.
-    ///
-    /// 2. **Version update (not pinned)** — when the URL contains a
-    ///    version-like ref (e.g. the head of a compare range like
-    ///    `v2.0.0`), check for a newer matching tag and update the URL.
-    ///
-    /// 3. **Empty hash filling** — when `hash` or `sha256` is an empty
-    ///    string, compute and fill the patch hash.  This also runs
-    ///    whenever the URL changes (cases 1–2) to keep the hash in sync.
     fn check_fetchpatch_call(call: &FetcherCall) -> Result<Option<Vec<Update>>> {
-        let url = match call.params.get("url") {
+        let url = match call.parsed.strings.get("url") {
             Some(url) => url,
             None => return Ok(None),
         };
@@ -425,10 +230,8 @@ impl FetcherRule {
         let mut current_url = url.clone();
         let mut url_changed = false;
 
-        // Try to parse the URL for revision following / version updates.
         let parsed_url = patch_url::parse_patch_url(url);
 
-        // Case 1: # follow:<branch> — revision following
         if let Some(branch) = &call.follow_branch {
             if let Some(parsed) = &parsed_url {
                 let git_url = parsed.git_remote_url();
@@ -454,26 +257,21 @@ impl FetcherRule {
                     }
                 }
             }
-        } else if !call.pinned {
-            // Case 2: not pinned — try version update for URLs with
-            // version-like refs (typically compare ranges).
-            if let Some(parsed) = &parsed_url
-                && parsed.is_version_ref()
+        } else if !call.pinned
+            && let Some(parsed) = &parsed_url
+            && parsed.is_version_ref()
+        {
+            let git_url = parsed.git_remote_url();
+            let current = parsed.current_ref();
+            if let Ok(Some(latest)) = GitFetcher::get_latest_tag_matching(&git_url, Some(current))
+                && VersionDetector::compare(current, &latest) == std::cmp::Ordering::Less
             {
-                let git_url = parsed.git_remote_url();
-                let current = parsed.current_ref();
-                if let Ok(Some(latest)) =
-                    GitFetcher::get_latest_tag_matching(&git_url, Some(current))
-                    && VersionDetector::compare(current, &latest) == std::cmp::Ordering::Less
-                {
-                    current_url = parsed.replace_ref(&latest);
-                    url_changed = true;
-                }
+                current_url = parsed.replace_ref(&latest);
+                url_changed = true;
             }
         }
 
-        // If URL changed, emit an update for it.
-        if url_changed && let Some(range) = call.source_ranges.get("url") {
+        if url_changed && let Some(range) = call.parsed.source_ranges.get("url") {
             updates.push(Update::new(
                 format!("{}.url", call.kind.name()),
                 format!("\"{}\"", current_url),
@@ -481,69 +279,80 @@ impl FetcherRule {
             ));
         }
 
-        // Determine strip count: fetchpatch passes `--strip=${stripLen}`
-        // to filterdiff, which strips that many path components from the
-        // output. The subsequent `filterdiff -p1` only affects matching
-        // (—strip-match), NOT the output paths. So the total strip is
-        // just stripLen (default 0).
-        let strip_len: usize = call
-            .params
-            .get("stripLen")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0);
+        let strip_len: usize = call.parsed.ints.get("stripLen").copied().unwrap_or(0) as usize;
 
-        let relative = call.params.get("relative").cloned();
-        let extra_prefix = call.params.get("extraPrefix").cloned();
-        let revert = call.params.get("revert") == Some(&"true".to_string());
+        let relative = call.parsed.strings.get("relative").cloned();
+        let extra_prefix = call.parsed.strings.get("extraPrefix").cloned();
+        let revert = call.parsed.bools.get("revert").copied().unwrap_or(false);
 
-        // If postFetch is set (non-empty), we can't compute the hash
-        // because it's arbitrary shell code that may modify the output.
-        let has_post_fetch = call.params.get("postFetch").is_some_and(|p| !p.is_empty());
+        let has_post_fetch = call
+            .parsed
+            .strings
+            .get("postFetch")
+            .is_some_and(|p| !p.is_empty());
 
-        // If decode is not "cat" (or absent), we can't compute the hash
-        // unless we natively support the decode command. Currently we
-        // only support the default ("cat" / absent).
         let decode = call
-            .params
+            .parsed
+            .strings
             .get("decode")
             .cloned()
             .unwrap_or_else(|| "cat".to_string());
         let can_decode = decode == "cat";
 
-        // Compute / recompute hash when:
-        // 1. URL changed (need to re-hash the new URL content), or
-        // 2. hash / sha256 is empty (fill it in).
         let needs_hash = (url_changed
-            || call.params.get("hash").is_some_and(|h| h.is_empty())
-            || call.params.get("sha256").is_some_and(|h| h.is_empty()))
+            || call
+                .parsed
+                .strings
+                .get("hash")
+                .is_some_and(|h| h.is_empty())
+            || call
+                .parsed
+                .strings
+                .get("sha256")
+                .is_some_and(|h| h.is_empty()))
             && !has_post_fetch
             && can_decode;
 
         if needs_hash {
-            let has_hash_source = call.source_ranges.contains_key("hash")
-                || call.source_ranges.contains_key("sha256");
+            let has_hash_source = call.parsed.source_ranges.contains_key("hash")
+                || call.parsed.source_ranges.contains_key("sha256");
 
             if has_hash_source {
                 let options = crate::utils::PatchOptions {
                     strip_len,
                     relative,
                     extra_prefix,
-                    excludes: call.excludes.clone(),
-                    includes: call.includes.clone(),
-                    hunks: call.hunks.clone(),
+                    excludes: call
+                        .parsed
+                        .list_strings
+                        .get("excludes")
+                        .cloned()
+                        .unwrap_or_default(),
+                    includes: call
+                        .parsed
+                        .list_strings
+                        .get("includes")
+                        .cloned()
+                        .unwrap_or_default(),
+                    hunks: call
+                        .parsed
+                        .list_ints
+                        .get("hunks")
+                        .map(|v| v.iter().map(|&i| i as usize).collect())
+                        .unwrap_or_default(),
                     revert,
                 };
                 let result = crate::utils::PatchHasher::hash_patch_url(&current_url, &options);
                 match result {
                     Ok(nar_hash) => {
-                        if let Some(range) = call.source_ranges.get("hash") {
+                        if let Some(range) = call.parsed.source_ranges.get("hash") {
                             updates.push(Update::new(
                                 format!("{}.hash", call.kind.name()),
                                 format!("\"{}\"", nar_hash.sri),
                                 *range,
                             ));
                         }
-                        if let Some(range) = call.source_ranges.get("sha256") {
+                        if let Some(range) = call.parsed.source_ranges.get("sha256") {
                             updates.push(Update::new(
                                 format!("{}.sha256", call.kind.name()),
                                 format!("\"{}\"", nar_hash.nix32),
@@ -586,7 +395,11 @@ impl FetcherRule {
             }
         };
 
-        let current_ref = call.params.get("rev").or_else(|| call.params.get("ref"));
+        let current_ref = call
+            .parsed
+            .strings
+            .get("rev")
+            .or_else(|| call.parsed.strings.get("ref"));
 
         if let Some(current) = current_ref
             && current == &new_sha
@@ -594,7 +407,7 @@ impl FetcherRule {
             return Ok(None);
         }
 
-        let ref_key = if call.params.contains_key("rev") {
+        let ref_key = if call.parsed.strings.contains_key("rev") {
             "rev"
         } else if call.kind == FetcherKind::BuiltinsFetchGit {
             "ref"
@@ -602,7 +415,7 @@ impl FetcherRule {
             "rev"
         };
 
-        if let Some(range) = call.source_ranges.get(ref_key) {
+        if let Some(range) = call.parsed.source_ranges.get(ref_key) {
             updates.push(Update::new(
                 format!("{}.rev", call.kind.name()),
                 format!("\"{}\"", new_sha),
@@ -622,7 +435,7 @@ impl FetcherRule {
         updates: &mut Vec<Update>,
     ) -> Result<Option<String>> {
         let Some((version_key, current_version)) =
-            version_ref_key_and_value(call.kind, &call.params)
+            version_ref_key_and_value(call.kind, &call.parsed)
         else {
             return Ok(None);
         };
@@ -636,7 +449,7 @@ impl FetcherRule {
             return Ok(None);
         }
 
-        if let Some(range) = call.source_ranges.get(version_key) {
+        if let Some(range) = call.parsed.source_ranges.get(version_key) {
             updates.push(Update::new(
                 format!("{}.{}", call.kind.name(), version_key),
                 format!("\"{}\"", latest),
@@ -650,13 +463,15 @@ impl FetcherRule {
     }
 
     fn resolve_rev(call: &FetcherCall, git_url: &str) -> Option<String> {
-        let key = preferred_ref_key(&call.params)?;
-        let ref_value = call.params.get(key)?;
+        let key = preferred_ref_key(&call.parsed)?;
+        let ref_value = call.parsed.strings.get(key)?;
         resolve_ref_for_prefetch(git_url, ref_value)
     }
 
     fn try_prefetch_hash(call: &FetcherCall, rev: &str, updates: &mut Vec<Update>) {
-        if !call.source_ranges.contains_key("hash") && !call.source_ranges.contains_key("sha256") {
+        if !call.parsed.source_ranges.contains_key("hash")
+            && !call.parsed.source_ranges.contains_key("sha256")
+        {
             return;
         }
 
@@ -664,14 +479,14 @@ impl FetcherRule {
 
         match result {
             Ok(nar_hash) => {
-                if let Some(range) = call.source_ranges.get("hash") {
+                if let Some(range) = call.parsed.source_ranges.get("hash") {
                     updates.push(Update::new(
                         format!("{}.hash", call.kind.name()),
                         format!("\"{}\"", nar_hash.sri),
                         *range,
                     ));
                 }
-                if let Some(range) = call.source_ranges.get("sha256") {
+                if let Some(range) = call.parsed.source_ranges.get("sha256") {
                     updates.push(Update::new(
                         format!("{}.sha256", call.kind.name()),
                         format!("\"{}\"", nar_hash.nix32),
@@ -680,7 +495,7 @@ impl FetcherRule {
                 }
             }
             Err(e) => {
-                let git_url = call.kind.git_url(&call.params).unwrap_or_default();
+                let git_url = call.kind.git_url(&call.parsed).unwrap_or_default();
                 eprintln!(
                     "Warning: could not prefetch hash for {} @ {}: {:#}",
                     git_url, rev, e
@@ -690,8 +505,16 @@ impl FetcherRule {
     }
 
     fn try_prefetch_empty_hash(call: &FetcherCall, git_url: &str, updates: &mut Vec<Update>) {
-        let has_empty_hash = call.params.get("hash").is_some_and(|h| h.is_empty())
-            || call.params.get("sha256").is_some_and(|h| h.is_empty());
+        let has_empty_hash = call
+            .parsed
+            .strings
+            .get("hash")
+            .is_some_and(|h| h.is_empty())
+            || call
+                .parsed
+                .strings
+                .get("sha256")
+                .is_some_and(|h| h.is_empty());
 
         if !has_empty_hash {
             return;
@@ -703,14 +526,23 @@ impl FetcherRule {
     }
 
     fn compute_hash(call: &FetcherCall, rev: &str) -> Result<NarHash> {
-        let has_sparse_checkout = !call.sparse_checkout.is_empty();
-        match call.kind.hash_strategy(&call.params, has_sparse_checkout) {
-            HashStrategy::Tarball => tarball::compute_hash(&call.kind, &call.params, rev),
+        let has_sparse_checkout = call
+            .parsed
+            .list_strings
+            .get("sparseCheckout")
+            .is_some_and(|v| !v.is_empty());
+        match call.kind.hash_strategy(&call.parsed, has_sparse_checkout) {
+            HashStrategy::Tarball => tarball::compute_hash(&call.kind, &call.parsed, rev),
             HashStrategy::Git => {
-                git_fetch::compute_hash(&call.kind, &call.params, rev, &call.sparse_checkout)
+                let sparse_checkout = call
+                    .parsed
+                    .list_strings
+                    .get("sparseCheckout")
+                    .cloned()
+                    .unwrap_or_default();
+                git_fetch::compute_hash(&call.kind, &call.parsed, rev, &sparse_checkout)
             }
             HashStrategy::Patch => {
-                // Patch hashing is handled separately in check_fetchpatch_call
                 anyhow::bail!("Patch hashing should be handled via check_fetchpatch_call")
             }
             HashStrategy::None => anyhow::bail!("No hash needed for this fetcher"),
@@ -746,10 +578,6 @@ impl FetcherRule {
             return false;
         }
 
-        // Walk up from the attrset through lambda/paren layers to find
-        // the mkDerivation call. Handles both:
-        //   mkDerivation { src = fetch ...; }     (direct attrset)
-        //   mkDerivation (finalAttrs: { src = fetch ...; })  (lambda-wrapped)
         let mut mk_derivation_apply = match attr_set.parent() {
             Some(p) => p,
             None => return false,
@@ -804,8 +632,6 @@ impl UpdateRule for FetcherRule {
             None => return Ok(None),
         };
 
-        // fetchpatch uses a URL-based hash strategy (flat SHA-256 of the
-        // normalized patch content), not a git-based one.
         match call.kind {
             FetcherKind::FetchPatch => Self::check_fetchpatch_call(&call),
             FetcherKind::BuiltinsFetchGit
@@ -1018,20 +844,21 @@ stdenv.mkDerivation rec {
             .traverse()
             .find(|n| n.kind() == rnix::SyntaxKind::NODE_ATTR_SET)
             .unwrap();
-        let attrs = super::parse_fetcher_attrset(&attr_set, &super::InterpolationSpec::none());
+        let attrs = super::parse_fetcher_attrset(
+            super::FetcherKind::FetchGit,
+            &attr_set,
+            &super::InterpolationSpec::none(),
+        );
         assert_eq!(
-            attrs.params.get("url"),
+            attrs.parsed.strings.get("url"),
             Some(&"https://example.com".to_string())
         );
-        assert_eq!(attrs.params.get("rev"), Some(&"v1.0".to_string()));
-        assert_eq!(
-            attrs.params.get("fetchSubmodules"),
-            Some(&"true".to_string())
-        );
+        assert_eq!(attrs.parsed.strings.get("rev"), Some(&"v1.0".to_string()));
+        assert_eq!(attrs.parsed.bools.get("fetchSubmodules"), Some(&true));
         assert!(attrs.interpolated.is_empty());
         assert!(attrs.interpolated_unresolved.is_empty());
-        assert!(attrs.source_ranges.contains_key("url"));
-        assert!(attrs.source_ranges.contains_key("rev"));
+        assert!(attrs.parsed.source_ranges.contains_key("url"));
+        assert!(attrs.parsed.source_ranges.contains_key("rev"));
     }
 
     #[test]
@@ -1042,15 +869,16 @@ stdenv.mkDerivation rec {
             .traverse()
             .find(|n| n.kind() == rnix::SyntaxKind::NODE_ATTR_SET)
             .unwrap();
-        let attrs = super::parse_fetcher_attrset(&attr_set, &super::InterpolationSpec::none());
-        // url is interpolated but not allowed by spec → unresolved
-        assert!(!attrs.params.contains_key("url"));
+        let attrs = super::parse_fetcher_attrset(
+            super::FetcherKind::FetchGit,
+            &attr_set,
+            &super::InterpolationSpec::none(),
+        );
+        assert!(!attrs.parsed.strings.contains_key("url"));
         assert_eq!(attrs.interpolated_unresolved, vec!["url"]);
-        // rev is pure → parsed normally
-        assert_eq!(attrs.params.get("rev"), Some(&"v1.0".to_string()));
+        assert_eq!(attrs.parsed.strings.get("rev"), Some(&"v1.0".to_string()));
         assert!(attrs.interpolated.is_empty());
-        // Range still recorded for url (it's a string node)
-        assert!(attrs.source_ranges.contains_key("url"));
+        assert!(attrs.parsed.source_ranges.contains_key("url"));
     }
 
     #[test]
@@ -1066,13 +894,14 @@ stdenv.mkDerivation rec {
             "rev",
             HashMap::from([("version".to_string(), "1.0".to_string())]),
         );
-        let attrs = super::parse_fetcher_attrset(&attr_set, &spec);
-        // rev is interpolated and allowed → goes to interpolated
+        let attrs = super::parse_fetcher_attrset(super::FetcherKind::FetchGit, &attr_set, &spec);
         assert!(attrs.interpolated.contains_key("rev"));
         assert!(attrs.interpolated_unresolved.is_empty());
-        assert!(!attrs.params.contains_key("rev"));
-        // version is pure → parsed normally
-        assert_eq!(attrs.params.get("version"), Some(&"1.0".to_string()));
+        assert!(!attrs.parsed.strings.contains_key("rev"));
+        assert_eq!(
+            attrs.parsed.strings.get("version"),
+            Some(&"1.0".to_string())
+        );
     }
 
     #[test]
@@ -1088,16 +917,13 @@ stdenv.mkDerivation rec {
             "rev",
             HashMap::from([("version".to_string(), "1.0".to_string())]),
         );
-        let attrs = super::parse_fetcher_attrset(&attr_set, &spec);
-        // rev uses ${unknown} but spec only provides version → unresolved
+        let attrs = super::parse_fetcher_attrset(super::FetcherKind::FetchGit, &attr_set, &spec);
         assert!(attrs.interpolated.is_empty());
         assert_eq!(attrs.interpolated_unresolved, vec!["rev"]);
     }
 
     #[test]
     fn test_parse_fetcher_attrset_dual_interpolation_vars() {
-        // When both "version" and "finalAttrs.version" are allowed,
-        // rev = "v${version}" should resolve via the "version" binding.
         let content = r#"{ rev = "v${version}"; owner = "test"; }"#;
         let root = parse_root(content);
         let attr_set = root
@@ -1112,18 +938,15 @@ stdenv.mkDerivation rec {
                 ("finalAttrs.version".to_string(), "1.0".to_string()),
             ]),
         );
-        let attrs = super::parse_fetcher_attrset(&attr_set, &spec);
+        let attrs = super::parse_fetcher_attrset(super::FetcherKind::FetchGit, &attr_set, &spec);
         assert!(attrs.interpolated.contains_key("rev"));
         assert!(attrs.interpolated_unresolved.is_empty());
-        assert!(!attrs.params.contains_key("rev"));
-        assert_eq!(attrs.params.get("owner"), Some(&"test".to_string()));
+        assert!(!attrs.parsed.strings.contains_key("rev"));
+        assert_eq!(attrs.parsed.strings.get("owner"), Some(&"test".to_string()));
     }
 
     #[test]
     fn test_parse_fetcher_attrset_dual_interpolation_vars_dotted() {
-        // When both "version" and "finalAttrs.version" are allowed,
-        // rev = "v${finalAttrs.version}" should resolve via the
-        // "finalAttrs.version" binding.
         let content = r#"{ rev = "v${finalAttrs.version}"; owner = "test"; }"#;
         let root = parse_root(content);
         let attr_set = root
@@ -1138,11 +961,11 @@ stdenv.mkDerivation rec {
                 ("finalAttrs.version".to_string(), "1.0".to_string()),
             ]),
         );
-        let attrs = super::parse_fetcher_attrset(&attr_set, &spec);
+        let attrs = super::parse_fetcher_attrset(super::FetcherKind::FetchGit, &attr_set, &spec);
         assert!(attrs.interpolated.contains_key("rev"));
         assert!(attrs.interpolated_unresolved.is_empty());
-        assert!(!attrs.params.contains_key("rev"));
-        assert_eq!(attrs.params.get("owner"), Some(&"test".to_string()));
+        assert!(!attrs.parsed.strings.contains_key("rev"));
+        assert_eq!(attrs.parsed.strings.get("owner"), Some(&"test".to_string()));
     }
 
     #[test]
@@ -1158,15 +981,11 @@ stdenv.mkDerivation rec {
 "#;
         let root = parse_root(content);
         let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
-        // try_extract_call should return None because url (an
-        // operational key) is interpolated but not permitted.
         assert!(super::FetcherRule::try_extract_call(&fetcher_node).is_none());
     }
 
     #[test]
-    fn test_fetcher_allows_non_operational_interpolated_key() {
-        // A non-operational key like "name" being interpolated should
-        // not cause the fetcher to be skipped.
+    fn test_fetcher_allows_unknown_interpolated_key() {
         let content = r#"
 {
   src = fetchgit {
@@ -1179,11 +998,12 @@ stdenv.mkDerivation rec {
 "#;
         let root = parse_root(content);
         let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
-        // "name" is not in OPERATIONAL_KEYS, so the call should still
-        // be extracted (rev is pure).
         let call = super::FetcherRule::try_extract_call(&fetcher_node);
         assert!(call.is_some());
-        assert_eq!(call.unwrap().params.get("rev"), Some(&"v1.0.0".to_string()));
+        assert_eq!(
+            call.unwrap().parsed.strings.get("rev"),
+            Some(&"v1.0.0".to_string())
+        );
     }
 
     #[test]
@@ -1231,17 +1051,14 @@ stdenv.mkDerivation (finalAttrs: {
             "rev",
             HashMap::from([("version".to_string(), "1.0".to_string())]),
         );
-        // rev merges allow_all + field-specific
         let rev_vars = spec.vars_for_field("rev").unwrap();
         assert_eq!(rev_vars.get("pname"), Some(&"foo".to_string()));
         assert_eq!(rev_vars.get("version"), Some(&"1.0".to_string()));
-        // owner only gets allow_all
         let owner_vars = spec.vars_for_field("owner").unwrap();
         assert_eq!(owner_vars.get("pname"), Some(&"foo".to_string()));
         assert!(!owner_vars.contains_key("version"));
-        // unknown field gets allow_all
-        let name_vars = spec.vars_for_field("name").unwrap();
-        assert_eq!(name_vars.get("pname"), Some(&"foo".to_string()));
+        let unknown_vars = spec.vars_for_field("name").unwrap();
+        assert_eq!(unknown_vars.get("pname"), Some(&"foo".to_string()));
     }
 
     #[test]
@@ -1280,11 +1097,17 @@ stdenv.mkDerivation (finalAttrs: {
             .unwrap();
         let mut spec = super::InterpolationSpec::none();
         spec.allow_idents(HashMap::from([("pname".to_string(), "my-pkg".to_string())]));
-        let attrs = super::parse_fetcher_attrset(&attr_set, &spec);
-        // bare ident pname should be resolved via ident_vars
-        assert_eq!(attrs.params.get("repo"), Some(&"my-pkg".to_string()));
-        assert_eq!(attrs.params.get("owner"), Some(&"test-org".to_string()));
-        assert_eq!(attrs.params.get("rev"), Some(&"v1.0.0".to_string()));
+        let attrs =
+            super::parse_fetcher_attrset(super::FetcherKind::FetchFromGitHub, &attr_set, &spec);
+        assert_eq!(
+            attrs.parsed.strings.get("repo"),
+            Some(&"my-pkg".to_string())
+        );
+        assert_eq!(
+            attrs.parsed.strings.get("owner"),
+            Some(&"test-org".to_string())
+        );
+        assert_eq!(attrs.parsed.strings.get("rev"), Some(&"v1.0.0".to_string()));
     }
 
     #[test]
@@ -1295,11 +1118,14 @@ stdenv.mkDerivation (finalAttrs: {
             .traverse()
             .find(|n| n.kind() == rnix::SyntaxKind::NODE_ATTR_SET)
             .unwrap();
-        // No ident_vars configured — pname is not resolved
         let spec = super::InterpolationSpec::none();
-        let attrs = super::parse_fetcher_attrset(&attr_set, &spec);
-        assert!(!attrs.params.contains_key("repo"));
-        assert_eq!(attrs.params.get("owner"), Some(&"test-org".to_string()));
+        let attrs =
+            super::parse_fetcher_attrset(super::FetcherKind::FetchFromGitHub, &attr_set, &spec);
+        assert!(!attrs.parsed.strings.contains_key("repo"));
+        assert_eq!(
+            attrs.parsed.strings.get("owner"),
+            Some(&"test-org".to_string())
+        );
     }
 
     #[test]
@@ -1312,11 +1138,11 @@ stdenv.mkDerivation (finalAttrs: {
             .unwrap();
         let mut spec = super::InterpolationSpec::none();
         spec.allow_all(HashMap::from([("pname".to_string(), "foo".to_string())]));
-        let attrs = super::parse_fetcher_attrset(&attr_set, &spec);
-        // owner interpolation is allowed via allow_all
+        let attrs =
+            super::parse_fetcher_attrset(super::FetcherKind::FetchFromGitHub, &attr_set, &spec);
         assert!(attrs.interpolated.contains_key("owner"));
         assert!(!attrs.interpolated_unresolved.iter().any(|k| k == "owner"));
-        assert_eq!(attrs.params.get("rev"), Some(&"v1.0.0".to_string()));
+        assert_eq!(attrs.parsed.strings.get("rev"), Some(&"v1.0.0".to_string()));
     }
 
     #[test]
@@ -1333,10 +1159,9 @@ stdenv.mkDerivation (finalAttrs: {
             "rev",
             HashMap::from([("version".to_string(), "1.0".to_string())]),
         );
-        let attrs = super::parse_fetcher_attrset(&attr_set, &spec);
-        // rev uses both pname (from allow_all) and version (from field-specific)
+        let attrs =
+            super::parse_fetcher_attrset(super::FetcherKind::FetchFromGitHub, &attr_set, &spec);
         assert!(attrs.interpolated.contains_key("rev"));
-        // owner uses only pname (from allow_all)
         assert!(attrs.interpolated.contains_key("owner"));
         assert!(attrs.interpolated_unresolved.is_empty());
     }

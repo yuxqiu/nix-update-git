@@ -1,17 +1,17 @@
-use std::collections::HashMap;
-
 use anyhow::Result;
 use nix_prefetch_git::{NarHash, PrefetchArgs, prefetch};
+
+use crate::parser::ParsedAttrs;
 
 use super::kind::FetcherKind;
 
 pub fn compute_hash(
     kind: &FetcherKind,
-    params: &HashMap<String, String>,
+    parsed: &ParsedAttrs,
     rev: &str,
     sparse_checkout: &[String],
 ) -> Result<NarHash> {
-    let git_url = match kind.git_url(params) {
+    let git_url = match kind.git_url(parsed) {
         Some(url) => url,
         None => anyhow::bail!("No git URL available"),
     };
@@ -22,13 +22,10 @@ pub fn compute_hash(
         "fetchSubmodules"
     };
 
-    // Pass Option<bool> for all boolean fields: None means "use nixpkgs default"
-    // (the nix-prefetch-git library resolves defaults internally). This lets us
-    // distinguish "not specified" from "explicitly set to false".
-    let fetch_submodules = params.get(submodules_key).map(|v| v == "true");
-    let deep_clone = params.get("deepClone").map(|v| v == "true");
-    let leave_dot_git = params.get("leaveDotGit").map(|v| v == "true");
-    let fetch_lfs = params.get("fetchLFS").map(|v| v == "true");
+    let fetch_submodules = parsed.bools.get(submodules_key).copied();
+    let deep_clone = parsed.bools.get("deepClone").copied();
+    let leave_dot_git = parsed.bools.get("leaveDotGit").copied();
+    let fetch_lfs = parsed.bools.get("fetchLFS").copied();
 
     let args = PrefetchArgs {
         url: git_url.clone(),
@@ -37,8 +34,12 @@ pub fn compute_hash(
         deep_clone,
         leave_dot_git,
         fetch_lfs,
-        branch_name: params.get("branchName").cloned(),
-        root_dir: params.get("rootDir").cloned().filter(|v| !v.is_empty()),
+        branch_name: parsed.strings.get("branchName").cloned(),
+        root_dir: parsed
+            .strings
+            .get("rootDir")
+            .cloned()
+            .filter(|v| !v.is_empty()),
         sparse_checkout: sparse_checkout.to_vec(),
     };
 

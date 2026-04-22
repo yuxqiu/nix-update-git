@@ -1,6 +1,7 @@
 #![cfg(test)]
 
-use crate::parser::{NixFile, NixNode};
+use crate::parser::{AttrSpec, AttrType, NixFile, NixNode};
+use std::collections::HashMap;
 
 fn parse(content: &str) -> NixNode {
     NixFile::parse(content).unwrap().root_node()
@@ -455,4 +456,262 @@ fn test_interpolated_var_affixes_non_string() {
     let value = node.attr_value().unwrap();
     let vars = std::collections::HashMap::new();
     assert_eq!(value.interpolated_var_affixes("version", &vars), None);
+}
+
+#[test]
+fn test_parse_attrs_pure_strings() {
+    let content = r#"{ url = "https://example.com"; rev = "v1.0"; }"#;
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    let spec = &[
+        AttrSpec {
+            key: "url",
+            attr_type: AttrType::String,
+        },
+        AttrSpec {
+            key: "rev",
+            attr_type: AttrType::String,
+        },
+    ];
+    let parsed = attr_set.parse_attrs(spec, None);
+    assert_eq!(
+        parsed.strings.get("url"),
+        Some(&"https://example.com".to_string())
+    );
+    assert_eq!(parsed.strings.get("rev"), Some(&"v1.0".to_string()));
+    assert!(parsed.bools.is_empty());
+    assert!(parsed.ints.is_empty());
+    assert!(parsed.source_ranges.contains_key("url"));
+    assert!(parsed.source_ranges.contains_key("rev"));
+    assert!(parsed.unknown_keys.is_empty());
+    assert!(parsed.type_mismatches.is_empty());
+}
+
+#[test]
+fn test_parse_attrs_bool_values() {
+    let content = r#"{ fetchSubmodules = true; deepClone = false; }"#;
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    let spec = &[
+        AttrSpec {
+            key: "fetchSubmodules",
+            attr_type: AttrType::Bool,
+        },
+        AttrSpec {
+            key: "deepClone",
+            attr_type: AttrType::Bool,
+        },
+    ];
+    let parsed = attr_set.parse_attrs(spec, None);
+    assert_eq!(parsed.bools.get("fetchSubmodules"), Some(&true));
+    assert_eq!(parsed.bools.get("deepClone"), Some(&false));
+    assert!(parsed.strings.is_empty());
+    assert!(parsed.unknown_keys.is_empty());
+}
+
+#[test]
+fn test_parse_attrs_int_values() {
+    let content = "{ stripLen = 1; }";
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    let spec = &[AttrSpec {
+        key: "stripLen",
+        attr_type: AttrType::Int,
+    }];
+    let parsed = attr_set.parse_attrs(spec, None);
+    assert_eq!(parsed.ints.get("stripLen"), Some(&1i64));
+    assert!(parsed.source_ranges.contains_key("stripLen"));
+}
+
+#[test]
+fn test_parse_attrs_list_strings() {
+    let content = r#"{ sparseCheckout = [ "path/to/dir" "another/dir" ]; }"#;
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    let spec = &[AttrSpec {
+        key: "sparseCheckout",
+        attr_type: AttrType::ListString,
+    }];
+    let parsed = attr_set.parse_attrs(spec, None);
+    assert_eq!(
+        parsed.list_strings.get("sparseCheckout"),
+        Some(&vec!["path/to/dir".to_string(), "another/dir".to_string()])
+    );
+}
+
+#[test]
+fn test_parse_attrs_list_ints() {
+    let content = "{ hunks = [ 1 2 3 ]; }";
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    let spec = &[AttrSpec {
+        key: "hunks",
+        attr_type: AttrType::ListInt,
+    }];
+    let parsed = attr_set.parse_attrs(spec, None);
+    assert_eq!(parsed.list_ints.get("hunks"), Some(&vec![1i64, 2i64, 3i64]));
+}
+
+#[test]
+fn test_parse_attrs_unknown_keys_parsed_as_strings() {
+    let content = r#"{ url = "https://example.com"; unknown_key = "hello"; }"#;
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    let spec = &[AttrSpec {
+        key: "url",
+        attr_type: AttrType::String,
+    }];
+    let parsed = attr_set.parse_attrs(spec, None);
+    assert_eq!(
+        parsed.strings.get("url"),
+        Some(&"https://example.com".to_string())
+    );
+    assert_eq!(
+        parsed.strings.get("unknown_key"),
+        Some(&"hello".to_string())
+    );
+    assert!(parsed.unknown_keys.contains(&"unknown_key".to_string()));
+}
+
+#[test]
+fn test_parse_attrs_type_mismatch() {
+    let content = "{ url = 123; fetchSubmodules = true; }";
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    let spec = &[
+        AttrSpec {
+            key: "url",
+            attr_type: AttrType::String,
+        },
+        AttrSpec {
+            key: "rev",
+            attr_type: AttrType::String,
+        },
+    ];
+    let parsed = attr_set.parse_attrs(spec, None);
+    assert!(!parsed.strings.contains_key("url"));
+    assert!(!parsed.type_mismatches.is_empty());
+    let mismatch = &parsed.type_mismatches[0];
+    assert_eq!(mismatch.0, "url");
+    assert_eq!(mismatch.1, AttrType::String);
+}
+
+#[test]
+fn test_parse_attrs_ident_resolution() {
+    let content = r#"{ repo = pname; owner = "test-org"; }"#;
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    let spec = &[
+        AttrSpec {
+            key: "repo",
+            attr_type: AttrType::String,
+        },
+        AttrSpec {
+            key: "owner",
+            attr_type: AttrType::String,
+        },
+    ];
+    let ident_vars = HashMap::from([("pname".to_string(), "my-pkg".to_string())]);
+    let parsed = attr_set.parse_attrs(spec, Some(&ident_vars));
+    assert_eq!(parsed.strings.get("repo"), Some(&"my-pkg".to_string()));
+    assert_eq!(parsed.strings.get("owner"), Some(&"test-org".to_string()));
+}
+
+#[test]
+fn test_parse_attrs_ident_not_in_vars_reported_as_mismatch() {
+    let content = r#"{ repo = pname; owner = "test-org"; }"#;
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    let spec = &[
+        AttrSpec {
+            key: "repo",
+            attr_type: AttrType::String,
+        },
+        AttrSpec {
+            key: "owner",
+            attr_type: AttrType::String,
+        },
+    ];
+    let parsed = attr_set.parse_attrs(spec, None::<&HashMap<String, String>>);
+    assert!(!parsed.strings.contains_key("repo"));
+    assert_eq!(parsed.strings.get("owner"), Some(&"test-org".to_string()));
+    assert!(!parsed.type_mismatches.is_empty());
+}
+
+#[test]
+fn test_parse_attrs_interpolated_string_in_string_nodes() {
+    let content = r#"{ url = "https://example.com/${name}"; rev = "v1.0"; }"#;
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    let spec = &[
+        AttrSpec {
+            key: "url",
+            attr_type: AttrType::String,
+        },
+        AttrSpec {
+            key: "rev",
+            attr_type: AttrType::String,
+        },
+    ];
+    let parsed = attr_set.parse_attrs(spec, None);
+    assert!(!parsed.strings.contains_key("url"));
+    assert!(parsed.string_nodes.contains_key("url"));
+    assert_eq!(parsed.strings.get("rev"), Some(&"v1.0".to_string()));
+}
+
+#[test]
+fn test_parse_attrs_mixed_spec() {
+    let content = r#"{ url = "https://example.com"; rev = "v1.0"; fetchSubmodules = true; stripLen = 2; sparseCheckout = [ "dir" ]; }"#;
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    let spec = &[
+        AttrSpec {
+            key: "url",
+            attr_type: AttrType::String,
+        },
+        AttrSpec {
+            key: "rev",
+            attr_type: AttrType::String,
+        },
+        AttrSpec {
+            key: "fetchSubmodules",
+            attr_type: AttrType::Bool,
+        },
+        AttrSpec {
+            key: "stripLen",
+            attr_type: AttrType::Int,
+        },
+        AttrSpec {
+            key: "sparseCheckout",
+            attr_type: AttrType::ListString,
+        },
+    ];
+    let parsed = attr_set.parse_attrs(spec, None);
+    assert_eq!(
+        parsed.strings.get("url"),
+        Some(&"https://example.com".to_string())
+    );
+    assert_eq!(parsed.strings.get("rev"), Some(&"v1.0".to_string()));
+    assert_eq!(parsed.bools.get("fetchSubmodules"), Some(&true));
+    assert_eq!(parsed.ints.get("stripLen"), Some(&2i64));
+    assert_eq!(
+        parsed.list_strings.get("sparseCheckout"),
+        Some(&vec!["dir".to_string()])
+    );
+}
+
+#[test]
+fn test_parse_attrs_empty_attrset() {
+    let content = "{}";
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    let spec = &[AttrSpec {
+        key: "url",
+        attr_type: AttrType::String,
+    }];
+    let parsed = attr_set.parse_attrs(spec, None);
+    assert!(parsed.strings.is_empty());
+    assert!(parsed.bools.is_empty());
+    assert!(parsed.ints.is_empty());
+    assert!(parsed.unknown_keys.is_empty());
 }

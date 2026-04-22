@@ -1,8 +1,19 @@
-use crate::parser::{NixNode, TextRange};
+use crate::parser::{AttrSpec, AttrType, NixNode, TextRange};
 use crate::rules::traits::{Update, UpdateRule};
 use crate::utils::{GitFetcher, VersionDetector};
 use anyhow::Result;
 use std::collections::HashMap;
+
+const FLAKE_INPUT_ATTR_SPEC: &[AttrSpec] = &[
+    AttrSpec {
+        key: "url",
+        attr_type: AttrType::String,
+    },
+    AttrSpec {
+        key: "ref",
+        attr_type: AttrType::String,
+    },
+];
 
 #[derive(Debug, Clone)]
 enum FlakeUrl {
@@ -206,9 +217,20 @@ impl FlakeInputRule {
                     let input_name = segments[1].clone();
                     if let Some(value) = node.attr_value() {
                         if value.kind() == rnix::SyntaxKind::NODE_ATTR_SET {
-                            let url = Self::extract_source_string(&value, "url");
-                            let ref_value = Self::extract_source_string(&value, "ref");
+                            let parsed = value.parse_attrs(FLAKE_INPUT_ATTR_SPEC, None);
                             let pinned = value.has_pin_comment() || node.has_pin_comment();
+                            let url = parsed.string_nodes.get("url").and_then(|n| {
+                                n.pure_string_content().map(|v| SourceValue {
+                                    value: v,
+                                    range: n.text_range(),
+                                })
+                            });
+                            let ref_value = parsed.string_nodes.get("ref").and_then(|n| {
+                                n.pure_string_content().map(|v| SourceValue {
+                                    value: v,
+                                    range: n.text_range(),
+                                })
+                            });
                             inputs
                                 .entry(input_name.clone())
                                 .or_insert_with(|| InputDef {
@@ -314,9 +336,20 @@ impl FlakeInputRule {
             if segments.len() == 1 {
                 if let Some(value) = entry.attr_value() {
                     if value.kind() == rnix::SyntaxKind::NODE_ATTR_SET {
-                        let url = Self::extract_source_string(&value, "url");
-                        let ref_value = Self::extract_source_string(&value, "ref");
+                        let parsed = value.parse_attrs(FLAKE_INPUT_ATTR_SPEC, None);
                         let pinned = value.has_pin_comment() || entry.has_pin_comment();
+                        let url = parsed.string_nodes.get("url").and_then(|n| {
+                            n.pure_string_content().map(|v| SourceValue {
+                                value: v,
+                                range: n.text_range(),
+                            })
+                        });
+                        let ref_value = parsed.string_nodes.get("ref").and_then(|n| {
+                            n.pure_string_content().map(|v| SourceValue {
+                                value: v,
+                                range: n.text_range(),
+                            })
+                        });
                         inputs
                             .entry(input_name.clone())
                             .or_insert_with(|| InputDef {
@@ -381,16 +414,6 @@ impl FlakeInputRule {
                 }
             }
         }
-    }
-
-    fn extract_source_string(attr_set: &NixNode, key: &str) -> Option<SourceValue> {
-        let node = attr_set.find_string_node(key)?;
-        let content = node.pure_string_content()?;
-        let range = node.text_range();
-        Some(SourceValue {
-            value: content,
-            range,
-        })
     }
 }
 

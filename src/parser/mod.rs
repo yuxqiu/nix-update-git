@@ -1,4 +1,6 @@
 mod ast;
 mod tests;
 
-pub use ast::{NixError, NixFile, NixNode, NixNodeIterator, TextRange};
+pub use ast::{
+    AttrSpec, AttrType, NixError, NixFile, NixNode, NixNodeIterator, ParsedAttrs, TextRange,
+};

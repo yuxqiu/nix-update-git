@@ -1,37 +1,32 @@
-use std::collections::HashMap;
-
 use anyhow::{Context, Result};
 
+use crate::parser::ParsedAttrs;
 use crate::utils::{NarHash, TarballHasher};
 
 use super::kind::FetcherKind;
 
-// TODO: Check whether the following url works for all platforms and
-// see if symbolic refs (tags) need to be resolved to commit SHAs before
-// constructing tarball URLs.
-fn build_tarball_url(
-    kind: &FetcherKind,
-    params: &HashMap<String, String>,
-    rev: &str,
-) -> Result<String> {
+fn build_tarball_url(kind: &FetcherKind, parsed: &ParsedAttrs, rev: &str) -> Result<String> {
     match kind {
         FetcherKind::FetchFromGitHub
         | FetcherKind::FetchFromGitea
         | FetcherKind::FetchFromForgejo => {
-            let owner = params
+            let owner = parsed
+                .strings
                 .get("owner")
                 .with_context(|| format!("missing 'owner' parameter for {}", kind.name()))?;
-            let repo = params
+            let repo = parsed
+                .strings
                 .get("repo")
                 .with_context(|| format!("missing 'repo' parameter for {}", kind.name()))?;
             let base = match kind {
-                FetcherKind::FetchFromGitHub => params
+                FetcherKind::FetchFromGitHub => parsed
+                    .strings
                     .get("githubBase")
                     .map(|s| s.as_str())
                     .unwrap_or("github.com"),
-                FetcherKind::FetchFromGitea | FetcherKind::FetchFromForgejo => params
+                FetcherKind::FetchFromGitea | FetcherKind::FetchFromForgejo => parsed
+                    .strings
                     .get("domain")
-                    .map(|s| s.as_str())
                     .with_context(|| format!("missing 'domain' parameter for {}", kind.name()))?,
                 _ => unreachable!(),
             };
@@ -41,14 +36,17 @@ fn build_tarball_url(
             ))
         }
         FetcherKind::FetchFromGitLab => {
-            let domain = params
+            let domain = parsed
+                .strings
                 .get("domain")
                 .map(|s| s.as_str())
                 .unwrap_or("gitlab.com");
-            let owner = params
+            let owner = parsed
+                .strings
                 .get("owner")
                 .with_context(|| "missing 'owner' parameter for fetchFromGitLab")?;
-            let repo = params
+            let repo = parsed
+                .strings
                 .get("repo")
                 .with_context(|| "missing 'repo' parameter for fetchFromGitLab")?;
             Ok(format!(
@@ -57,10 +55,12 @@ fn build_tarball_url(
             ))
         }
         FetcherKind::FetchFromCodeberg => {
-            let owner = params
+            let owner = parsed
+                .strings
                 .get("owner")
                 .with_context(|| "missing 'owner' parameter for fetchFromCodeberg")?;
-            let repo = params
+            let repo = parsed
+                .strings
                 .get("repo")
                 .with_context(|| "missing 'repo' parameter for fetchFromCodeberg")?;
             Ok(format!(
@@ -69,34 +69,44 @@ fn build_tarball_url(
             ))
         }
         FetcherKind::FetchFromSourcehut => {
-            let owner = params
+            let owner = parsed
+                .strings
                 .get("owner")
                 .with_context(|| "missing 'owner' parameter for fetchFromSourcehut")?;
             let owner_with_tilde = if owner.starts_with('~') {
                 owner.clone()
             } else {
-                // Sourcehut archive endpoints use "~owner/repo" paths.
-                // Align with `FetcherKind::git_url`.
                 format!("~{}", owner)
             };
-            let repo = params
+            let repo = parsed
+                .strings
                 .get("repo")
                 .with_context(|| "missing 'repo' parameter for fetchFromSourcehut")?;
-            let domain = params.get("domain").map(|s| s.as_str()).unwrap_or("sr.ht");
-            let vc = params.get("vc").map(|s| s.as_str()).unwrap_or("git");
+            let domain = parsed
+                .strings
+                .get("domain")
+                .map(|s| s.as_str())
+                .unwrap_or("sr.ht");
+            let vc = parsed
+                .strings
+                .get("vc")
+                .map(|s| s.as_str())
+                .unwrap_or("git");
             Ok(format!(
                 "https://{}.{}/{}/{}/archive/{}.tar.gz",
                 vc, domain, owner_with_tilde, repo, rev
             ))
         }
         FetcherKind::FetchFromBitbucket => {
-            let owner = params
+            let owner = parsed
+                .strings
                 .get("owner")
                 .with_context(|| "missing 'owner' parameter for fetchFromBitbucket")?;
-            let repo = params
+            let repo = parsed
+                .strings
                 .get("repo")
                 .with_context(|| "missing 'repo' parameter for fetchFromBitbucket")?;
-            let rev_or_tag = if params.contains_key("tag") {
+            let rev_or_tag = if parsed.strings.contains_key("tag") {
                 format!("refs/tags/{}", rev)
             } else {
                 rev.to_string()
@@ -107,10 +117,11 @@ fn build_tarball_url(
             ))
         }
         FetcherKind::FetchFromGitiles => {
-            let base_url = params
+            let base_url = parsed
+                .strings
                 .get("url")
                 .with_context(|| "missing 'url' parameter for fetchFromGitiles")?;
-            let rev_or_tag = if params.contains_key("tag") {
+            let rev_or_tag = if parsed.strings.contains_key("tag") {
                 format!("refs/tags/{}", rev)
             } else {
                 rev.to_string()
@@ -118,7 +129,8 @@ fn build_tarball_url(
             Ok(format!("{}/+archive/{}.tar.gz", base_url, rev_or_tag))
         }
         FetcherKind::FetchFromRepoOrCz => {
-            let repo = params
+            let repo = parsed
+                .strings
                 .get("repo")
                 .with_context(|| "missing 'repo' parameter for fetchFromRepoOrCz")?;
             Ok(format!(
@@ -130,12 +142,8 @@ fn build_tarball_url(
     }
 }
 
-pub fn compute_hash(
-    kind: &FetcherKind,
-    params: &HashMap<String, String>,
-    rev: &str,
-) -> Result<NarHash> {
-    let url = build_tarball_url(kind, params, rev)?;
+pub fn compute_hash(kind: &FetcherKind, parsed: &ParsedAttrs, rev: &str) -> Result<NarHash> {
+    let url = build_tarball_url(kind, parsed, rev)?;
     TarballHasher::hash_tarball_url(&url)
 }
 
@@ -143,21 +151,22 @@ pub fn compute_hash(
 mod tests {
     use super::*;
 
-    fn map(entries: &[(&str, &str)]) -> HashMap<String, String> {
-        entries
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect()
+    fn params(entries: &[(&str, &str)]) -> ParsedAttrs {
+        let mut p = ParsedAttrs::default();
+        for (k, v) in entries {
+            p.strings.insert(k.to_string(), v.to_string());
+        }
+        p
     }
 
     #[test]
     fn test_build_tarball_url_gitea() {
-        let params = map(&[
+        let p = params(&[
             ("domain", "gitea.example"),
             ("owner", "alice"),
             ("repo", "proj"),
         ]);
-        let url = build_tarball_url(&FetcherKind::FetchFromGitea, &params, "v1.2.3").unwrap();
+        let url = build_tarball_url(&FetcherKind::FetchFromGitea, &p, "v1.2.3").unwrap();
         assert_eq!(
             url,
             "https://gitea.example/alice/proj/archive/v1.2.3.tar.gz"
@@ -166,15 +175,21 @@ mod tests {
 
     #[test]
     fn test_build_tarball_url_bitbucket_tag_is_refs_tags() {
-        let params = map(&[("owner", "o"), ("repo", "r"), ("tag", "v1.0.0")]);
-        let url = build_tarball_url(&FetcherKind::FetchFromBitbucket, &params, "v2.0.0").unwrap();
+        let mut p = ParsedAttrs::default();
+        p.strings.insert("owner".to_string(), "o".to_string());
+        p.strings.insert("repo".to_string(), "r".to_string());
+        p.strings.insert("tag".to_string(), "v1.0.0".to_string());
+        let url = build_tarball_url(&FetcherKind::FetchFromBitbucket, &p, "v2.0.0").unwrap();
         assert_eq!(url, "https://bitbucket.org/o/r/get/refs/tags/v2.0.0.tar.gz");
     }
 
     #[test]
     fn test_build_tarball_url_gitiles_tag_is_refs_tags() {
-        let params = map(&[("url", "https://g.example/repo"), ("tag", "v1.0.0")]);
-        let url = build_tarball_url(&FetcherKind::FetchFromGitiles, &params, "v2.0.0").unwrap();
+        let mut p = ParsedAttrs::default();
+        p.strings
+            .insert("url".to_string(), "https://g.example/repo".to_string());
+        p.strings.insert("tag".to_string(), "v1.0.0".to_string());
+        let url = build_tarball_url(&FetcherKind::FetchFromGitiles, &p, "v2.0.0").unwrap();
         assert_eq!(
             url,
             "https://g.example/repo/+archive/refs/tags/v2.0.0.tar.gz"

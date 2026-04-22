@@ -2,27 +2,13 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 
-use crate::parser::{NixNode, TextRange};
+use crate::parser::{NixNode, ParsedAttrs, TextRange};
 use crate::rules::fetcher::{
-    InterpolationSpec, OPERATIONAL_KEYS, git_fetch, is_commit_hash, kind::FetcherKind,
-    kind::HashStrategy, parse_fetcher_attrset, preferred_ref_key, resolve_ref_for_prefetch,
-    tarball,
+    InterpolationSpec, git_fetch, is_commit_hash, kind::FetcherKind, kind::HashStrategy,
+    parse_fetcher_attrset, preferred_ref_key, resolve_ref_for_prefetch, tarball,
 };
 use crate::rules::traits::{Update, UpdateRule};
 use crate::utils::{GitFetcher, NarHash, VersionDetector};
-
-// Resolution strategy:
-// 1) Select source ref key with fetcher precedence: tag > rev > ref.
-// 2) Derive update intent primarily from that source ref (pure or interpolated);
-//    fall back to mkDerivation.version for empty/hash refs.
-// 3) When source ref changes (or hash is empty), recompute hash/sha256 using the
-//    resolved fetch revision. For interpolated refs, only version is rewritten.
-//
-// Two attrset wrapping patterns are supported:
-//   mkDerivation rec { version = ...; src = fetchX { ... }; }
-//   mkDerivation (finalAttrs: { version = ...; src = fetchX { ... }; })
-// In both cases, source refs like `rev = "v${version}"` or
-// `rev = "v${finalAttrs.version}"` can be interpolated.
 
 struct MkDerivationCall {
     version_value: String,
@@ -31,13 +17,7 @@ struct MkDerivationCall {
     source_ref_value: SourceRefValue,
     source_ref_range: Option<TextRange>,
     fetcher_kind: FetcherKind,
-    fetcher_params: HashMap<String, String>,
-    fetcher_source_ranges: HashMap<String, TextRange>,
-    fetcher_sparse_checkout: Vec<String>,
-    /// Stable variable bindings (pname and other pure string attrs)
-    /// that can be used to resolve fetcher interpolations alongside
-    /// version.  Keys are variable names as they appear in Nix
-    /// interpolations (e.g. `"pname"`, `"finalAttrs.pname"`).
+    fetcher_parsed: ParsedAttrs,
     extra_vars: HashMap<String, String>,
     pinned: bool,
 }
@@ -47,10 +27,6 @@ enum SourceRefValue {
     Pure(String),
     InterpolatedFromVersion {
         template_node: NixNode,
-        /// The variable name used for interpolation resolution, e.g.
-        /// "version" for `${version}` or "finalAttrs.version" for
-        /// `${finalAttrs.version}`. Determined by probing the template
-        /// node against the available version variable names.
         version_var: String,
     },
 }
@@ -66,8 +42,6 @@ impl MkDerivationRule {
             return None;
         }
 
-        // Handles both mkDerivation rec { ... } and
-        // mkDerivation (finalAttrs: { ... })
         let arg = node.apply_argument_attrset()?;
 
         let version_entry = arg.find_attr_by_key("version")?;
@@ -80,9 +54,6 @@ impl MkDerivationRule {
             return None;
         }
 
-        // Collect pure string attributes from the mkDerivation attrset
-        // (pname and any others) that may be referenced by the
-        // fetcher call via bare idents or string interpolation.
         let mut stable_attrs: HashMap<String, String> = HashMap::new();
         for child in arg.children() {
             if child.kind() != rnix::SyntaxKind::NODE_ATTRPATH_VALUE {
@@ -105,15 +76,8 @@ impl MkDerivationRule {
 
         let is_recursive = arg.text().trim_start().starts_with("rec");
 
-        // For lambda-wrapped patterns like mkDerivation (finalAttrs: { ... }),
-        // the lambda parameter provides self-reference via ${finalAttrs.version}.
-        // When both rec and a lambda param are present (e.g., mkDerivation (finalAttrs: rec { ... })),
-        // both ${version} and ${finalAttrs.version} are valid interpolations.
         let lambda_param = node.apply_lambda_param();
 
-        // Collect all possible version variable names for interpolation.
-        // rec { } allows bare ${version}; lambda (x:) allows ${x.version}.
-        // When both are present, both forms are valid.
         let version_vars: Vec<String> = {
             let mut vars = Vec::new();
             if is_recursive {
@@ -139,12 +103,6 @@ impl MkDerivationRule {
             return None;
         }
 
-        // Build variable maps for pname and other stable attrs so
-        // the fetcher can reference them via bare idents (e.g.
-        // `repo = pname`) or string interpolation (e.g.
-        // `owner = "${pname}-org"`).  In rec {} attrsets, bare
-        // names are valid.  With a lambda param, dotted references
-        // like ${finalAttrs.pname} are valid.
         let mut ident_vars: HashMap<String, String> = HashMap::new();
         let mut interpolation_vars: HashMap<String, String> = HashMap::new();
         if is_recursive {
@@ -155,18 +113,12 @@ impl MkDerivationRule {
         }
         if let Some(ref param) = lambda_param {
             for (key, value) in &stable_attrs {
-                // Bare form is always valid for ident resolution
-                // even inside lambda-wrapped attrsets.
                 ident_vars.insert(key.clone(), value.clone());
                 let dotted = format!("{}.{}", param, key);
                 interpolation_vars.insert(dotted, value.clone());
             }
         }
 
-        // Build interpolation spec: allow tag/rev/ref to be interpolated
-        // with the version variable(s) when self-reference is available.
-        // Also allow any field to use pname/other stable vars via
-        // allow_all, and resolve bare idents via ident_vars.
         let mut spec = InterpolationSpec::none();
         if !interpolation_vars.is_empty() {
             spec.allow_all(interpolation_vars.clone());
@@ -175,9 +127,6 @@ impl MkDerivationRule {
             spec.allow_idents(ident_vars);
         }
         if !version_vars.is_empty() {
-            // Merge all version variable mappings into one map per field,
-            // so that both ${version} and ${finalAttrs.version} resolve
-            // correctly when both rec and lambda are present.
             let vars: HashMap<String, String> = version_vars
                 .iter()
                 .map(|v| (v.clone(), version_content.clone()))
@@ -187,13 +136,8 @@ impl MkDerivationRule {
             spec.allow("ref", vars);
         }
 
-        let mut attrs = parse_fetcher_attrset(&src_arg, &spec);
+        let mut attrs = parse_fetcher_attrset(fetcher_kind, &src_arg, &spec);
 
-        // Resolve interpolated fields that only use stable variables
-        // (pname, etc.) into params so they're available for git_url()
-        // etc.  Fields that also depend on version are left in
-        // `interpolated` for later re-resolution.  Source ref fields
-        // (tag/rev/ref) are always kept in `interpolated` regardless.
         let source_ref_keys = ["tag", "rev", "ref"];
         let resolved_keys: Vec<String> = attrs
             .interpolated
@@ -203,27 +147,24 @@ impl MkDerivationRule {
             .collect();
         for key in resolved_keys {
             if let Some(template) = attrs.interpolated.remove(&key) {
-                // Try resolution with stable vars only; if the field
-                // also depends on version, keep it in interpolated.
                 if let Some(resolved) = template.interpolated_string_content(&interpolation_vars) {
-                    attrs.params.insert(key, resolved);
+                    attrs.parsed.strings.insert(key, resolved);
                 } else {
                     attrs.interpolated.insert(key, template);
                 }
             }
         }
 
-        // Conservatively skip if any operational key is interpolated but
-        // not permitted by the spec (e.g., url, owner, repo).
+        let op_keys = fetcher_kind.operational_keys();
         if attrs
             .interpolated_unresolved
             .iter()
-            .any(|k| OPERATIONAL_KEYS.contains(&k.as_str()))
+            .any(|k| op_keys.contains(&k.as_str()))
         {
             return None;
         }
 
-        let source_ref_key = preferred_ref_key(&attrs.params)
+        let source_ref_key = preferred_ref_key(&attrs.parsed)
             .map(|k| k.to_string())
             .or_else(|| {
                 if attrs.interpolated.contains_key("tag") {
@@ -238,12 +179,9 @@ impl MkDerivationRule {
             });
 
         let source_ref_value = if let Some(key) = &source_ref_key {
-            if let Some(value) = attrs.params.get(key) {
+            if let Some(value) = attrs.parsed.strings.get(key) {
                 SourceRefValue::Pure(value.clone())
             } else if let Some(template_node) = attrs.interpolated.remove(key) {
-                // Determine which version variable the template actually uses
-                // by probing each candidate. Falls back to the first candidate
-                // (which should always match since the spec already validated it).
                 let detected_var = version_vars
                     .iter()
                     .find(|v| {
@@ -266,7 +204,7 @@ impl MkDerivationRule {
 
         let source_ref_range = source_ref_key
             .as_ref()
-            .and_then(|key| attrs.source_ranges.get(key))
+            .and_then(|key| attrs.parsed.source_ranges.get(key))
             .copied();
 
         let pinned = arg.has_pin_comment()
@@ -281,24 +219,27 @@ impl MkDerivationRule {
             source_ref_value,
             source_ref_range,
             fetcher_kind,
-            fetcher_params: attrs.params,
-            fetcher_source_ranges: attrs.source_ranges,
-            fetcher_sparse_checkout: attrs.sparse_checkout,
+            fetcher_parsed: attrs.parsed,
             extra_vars: interpolation_vars,
             pinned,
         })
     }
 
-    fn compute_hash(
-        kind: &FetcherKind,
-        params: &HashMap<String, String>,
-        rev: &str,
-        sparse_checkout: &[String],
-    ) -> Result<NarHash> {
-        let has_sparse_checkout = !sparse_checkout.is_empty();
-        match kind.hash_strategy(params, has_sparse_checkout) {
-            HashStrategy::Tarball => tarball::compute_hash(kind, params, rev),
-            HashStrategy::Git => git_fetch::compute_hash(kind, params, rev, sparse_checkout),
+    fn compute_hash(kind: &FetcherKind, parsed: &ParsedAttrs, rev: &str) -> Result<NarHash> {
+        let has_sparse_checkout = parsed
+            .list_strings
+            .get("sparseCheckout")
+            .is_some_and(|v| !v.is_empty());
+        match kind.hash_strategy(parsed, has_sparse_checkout) {
+            HashStrategy::Tarball => tarball::compute_hash(kind, parsed, rev),
+            HashStrategy::Git => {
+                let sparse_checkout = parsed
+                    .list_strings
+                    .get("sparseCheckout")
+                    .cloned()
+                    .unwrap_or_default();
+                git_fetch::compute_hash(kind, parsed, rev, &sparse_checkout)
+            }
             HashStrategy::Patch => anyhow::bail!("Patch hashing should be handled by fetcher rule"),
             HashStrategy::None => anyhow::bail!("No hash needed for this fetcher"),
         }
@@ -326,7 +267,7 @@ impl MkDerivationRule {
             return Ok(None);
         }
 
-        let git_url = match call.fetcher_kind.git_url(&call.fetcher_params) {
+        let git_url = match call.fetcher_kind.git_url(&call.fetcher_parsed) {
             Some(url) => url,
             None => return Ok(None),
         };
@@ -428,11 +369,13 @@ impl MkDerivationRule {
         }
 
         let hash_empty = call
-            .fetcher_params
+            .fetcher_parsed
+            .strings
             .get("hash")
             .is_some_and(String::is_empty)
             || call
-                .fetcher_params
+                .fetcher_parsed
+                .strings
                 .get("sha256")
                 .is_some_and(String::is_empty);
         let should_refresh_hash =
@@ -460,22 +403,18 @@ impl MkDerivationRule {
             };
 
             if let Some(rev_for_hash) = rev_for_hash {
-                let result = Self::compute_hash(
-                    &call.fetcher_kind,
-                    &call.fetcher_params,
-                    &rev_for_hash,
-                    &call.fetcher_sparse_checkout,
-                );
+                let result =
+                    Self::compute_hash(&call.fetcher_kind, &call.fetcher_parsed, &rev_for_hash);
                 match result {
                     Ok(nar_hash) => {
-                        if let Some(range) = call.fetcher_source_ranges.get("hash") {
+                        if let Some(range) = call.fetcher_parsed.source_ranges.get("hash") {
                             updates.push(Update::new(
                                 format!("{}.hash", call.fetcher_kind.name()),
                                 format!("\"{}\"", nar_hash.sri),
                                 *range,
                             ));
                         }
-                        if let Some(range) = call.fetcher_source_ranges.get("sha256") {
+                        if let Some(range) = call.fetcher_parsed.source_ranges.get("sha256") {
                             updates.push(Update::new(
                                 format!("{}.sha256", call.fetcher_kind.name()),
                                 format!("\"{}\"", nar_hash.nix32),
