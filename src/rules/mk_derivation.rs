@@ -136,7 +136,10 @@ impl MkDerivationRule {
             spec.allow("ref", vars);
         }
 
-        let mut attrs = parse_fetcher_attrset(fetcher_kind, &src_arg, &spec);
+        let mut attrs = match parse_fetcher_attrset(fetcher_kind, &src_arg, &spec) {
+            Ok(a) => a,
+            Err(_) => return None,
+        };
 
         let source_ref_keys = ["tag", "rev", "ref"];
         let resolved_keys: Vec<String> = attrs
@@ -204,8 +207,7 @@ impl MkDerivationRule {
 
         let source_ref_range = source_ref_key
             .as_ref()
-            .and_then(|key| attrs.parsed.source_ranges.get(key))
-            .copied();
+            .and_then(|key| attrs.parsed.string_range(key));
 
         let pinned = arg.has_pin_comment()
             || node.has_pin_comment()
@@ -227,16 +229,13 @@ impl MkDerivationRule {
 
     fn compute_hash(kind: &FetcherKind, parsed: &ParsedAttrs, rev: &str) -> Result<NarHash> {
         let has_sparse_checkout = parsed
-            .list_strings
-            .get("sparseCheckout")
+            .pure_string_list("sparseCheckout")
             .is_some_and(|v| !v.is_empty());
         match kind.hash_strategy(parsed, has_sparse_checkout) {
             HashStrategy::Tarball => tarball::compute_hash(kind, parsed, rev),
             HashStrategy::Git => {
                 let sparse_checkout = parsed
-                    .list_strings
-                    .get("sparseCheckout")
-                    .cloned()
+                    .pure_string_list("sparseCheckout")
                     .unwrap_or_default();
                 git_fetch::compute_hash(kind, parsed, rev, &sparse_checkout)
             }
@@ -407,18 +406,18 @@ impl MkDerivationRule {
                     Self::compute_hash(&call.fetcher_kind, &call.fetcher_parsed, &rev_for_hash);
                 match result {
                     Ok(nar_hash) => {
-                        if let Some(range) = call.fetcher_parsed.source_ranges.get("hash") {
+                        if let Some(range) = call.fetcher_parsed.string_range("hash") {
                             updates.push(Update::new(
                                 format!("{}.hash", call.fetcher_kind.name()),
                                 format!("\"{}\"", nar_hash.sri),
-                                *range,
+                                range,
                             ));
                         }
-                        if let Some(range) = call.fetcher_parsed.source_ranges.get("sha256") {
+                        if let Some(range) = call.fetcher_parsed.string_range("sha256") {
                             updates.push(Update::new(
                                 format!("{}.sha256", call.fetcher_kind.name()),
                                 format!("\"{}\"", nar_hash.nix32),
-                                *range,
+                                range,
                             ));
                         }
                     }

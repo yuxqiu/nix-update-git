@@ -111,13 +111,13 @@ pub(crate) fn parse_fetcher_attrset(
     kind: FetcherKind,
     attr_set: &NixNode,
     spec: &InterpolationSpec,
-) -> FetcherAttrs {
+) -> Result<FetcherAttrs, anyhow::Error> {
     let ident_vars_opt = if spec.ident_vars.is_empty() {
         None
     } else {
         Some(&spec.ident_vars)
     };
-    let parsed = attr_set.parse_attrs(kind.attr_spec(), ident_vars_opt);
+    let parsed = attr_set.parse_attrs(kind.attr_spec(), ident_vars_opt)?;
 
     let mut interpolated = HashMap::new();
     let mut interpolated_unresolved = Vec::new();
@@ -136,11 +136,11 @@ pub(crate) fn parse_fetcher_attrset(
         }
     }
 
-    FetcherAttrs {
+    Ok(FetcherAttrs {
         parsed,
         interpolated,
         interpolated_unresolved,
-    }
+    })
 }
 
 struct FetcherCall {
@@ -164,7 +164,10 @@ impl FetcherRule {
         }
 
         let op_keys = kind.operational_keys();
-        let attrs = parse_fetcher_attrset(kind, &arg, &InterpolationSpec::none());
+        let attrs = match parse_fetcher_attrset(kind, &arg, &InterpolationSpec::none()) {
+            Ok(a) => a,
+            Err(_) => return None,
+        };
 
         if attrs
             .interpolated_unresolved
@@ -271,11 +274,11 @@ impl FetcherRule {
             }
         }
 
-        if url_changed && let Some(range) = call.parsed.source_ranges.get("url") {
+        if url_changed && let Some(range) = call.parsed.string_range("url") {
             updates.push(Update::new(
                 format!("{}.url", call.kind.name()),
                 format!("\"{}\"", current_url),
-                *range,
+                range,
             ));
         }
 
@@ -314,26 +317,16 @@ impl FetcherRule {
             && can_decode;
 
         if needs_hash {
-            let has_hash_source = call.parsed.source_ranges.contains_key("hash")
-                || call.parsed.source_ranges.contains_key("sha256");
+            let has_hash_source =
+                call.parsed.has_string("hash") || call.parsed.has_string("sha256");
 
             if has_hash_source {
                 let options = crate::utils::PatchOptions {
                     strip_len,
                     relative,
                     extra_prefix,
-                    excludes: call
-                        .parsed
-                        .list_strings
-                        .get("excludes")
-                        .cloned()
-                        .unwrap_or_default(),
-                    includes: call
-                        .parsed
-                        .list_strings
-                        .get("includes")
-                        .cloned()
-                        .unwrap_or_default(),
+                    excludes: call.parsed.pure_string_list("excludes").unwrap_or_default(),
+                    includes: call.parsed.pure_string_list("includes").unwrap_or_default(),
                     hunks: call
                         .parsed
                         .list_ints
@@ -345,18 +338,18 @@ impl FetcherRule {
                 let result = crate::utils::PatchHasher::hash_patch_url(&current_url, &options);
                 match result {
                     Ok(nar_hash) => {
-                        if let Some(range) = call.parsed.source_ranges.get("hash") {
+                        if let Some(range) = call.parsed.string_range("hash") {
                             updates.push(Update::new(
                                 format!("{}.hash", call.kind.name()),
                                 format!("\"{}\"", nar_hash.sri),
-                                *range,
+                                range,
                             ));
                         }
-                        if let Some(range) = call.parsed.source_ranges.get("sha256") {
+                        if let Some(range) = call.parsed.string_range("sha256") {
                             updates.push(Update::new(
                                 format!("{}.sha256", call.kind.name()),
                                 format!("\"{}\"", nar_hash.nix32),
-                                *range,
+                                range,
                             ));
                         }
                     }
@@ -415,11 +408,11 @@ impl FetcherRule {
             "rev"
         };
 
-        if let Some(range) = call.parsed.source_ranges.get(ref_key) {
+        if let Some(range) = call.parsed.string_range(ref_key) {
             updates.push(Update::new(
                 format!("{}.rev", call.kind.name()),
                 format!("\"{}\"", new_sha),
-                *range,
+                range,
             ));
 
             Ok(Some(new_sha))
@@ -449,11 +442,11 @@ impl FetcherRule {
             return Ok(None);
         }
 
-        if let Some(range) = call.parsed.source_ranges.get(version_key) {
+        if let Some(range) = call.parsed.string_range(version_key) {
             updates.push(Update::new(
                 format!("{}.{}", call.kind.name(), version_key),
                 format!("\"{}\"", latest),
-                *range,
+                range,
             ));
 
             Ok(Some(latest))
@@ -469,9 +462,7 @@ impl FetcherRule {
     }
 
     fn try_prefetch_hash(call: &FetcherCall, rev: &str, updates: &mut Vec<Update>) {
-        if !call.parsed.source_ranges.contains_key("hash")
-            && !call.parsed.source_ranges.contains_key("sha256")
-        {
+        if !call.parsed.has_string("hash") && !call.parsed.has_string("sha256") {
             return;
         }
 
@@ -479,18 +470,18 @@ impl FetcherRule {
 
         match result {
             Ok(nar_hash) => {
-                if let Some(range) = call.parsed.source_ranges.get("hash") {
+                if let Some(range) = call.parsed.string_range("hash") {
                     updates.push(Update::new(
                         format!("{}.hash", call.kind.name()),
                         format!("\"{}\"", nar_hash.sri),
-                        *range,
+                        range,
                     ));
                 }
-                if let Some(range) = call.parsed.source_ranges.get("sha256") {
+                if let Some(range) = call.parsed.string_range("sha256") {
                     updates.push(Update::new(
                         format!("{}.sha256", call.kind.name()),
                         format!("\"{}\"", nar_hash.nix32),
-                        *range,
+                        range,
                     ));
                 }
             }
@@ -528,17 +519,14 @@ impl FetcherRule {
     fn compute_hash(call: &FetcherCall, rev: &str) -> Result<NarHash> {
         let has_sparse_checkout = call
             .parsed
-            .list_strings
-            .get("sparseCheckout")
+            .pure_string_list("sparseCheckout")
             .is_some_and(|v| !v.is_empty());
         match call.kind.hash_strategy(&call.parsed, has_sparse_checkout) {
             HashStrategy::Tarball => tarball::compute_hash(&call.kind, &call.parsed, rev),
             HashStrategy::Git => {
                 let sparse_checkout = call
                     .parsed
-                    .list_strings
-                    .get("sparseCheckout")
-                    .cloned()
+                    .pure_string_list("sparseCheckout")
                     .unwrap_or_default();
                 git_fetch::compute_hash(&call.kind, &call.parsed, rev, &sparse_checkout)
             }
@@ -848,7 +836,8 @@ stdenv.mkDerivation rec {
             super::FetcherKind::FetchGit,
             &attr_set,
             &super::InterpolationSpec::none(),
-        );
+        )
+        .unwrap();
         assert_eq!(
             attrs.parsed.strings.get("url"),
             Some(&"https://example.com".to_string())
@@ -857,8 +846,8 @@ stdenv.mkDerivation rec {
         assert_eq!(attrs.parsed.bools.get("fetchSubmodules"), Some(&true));
         assert!(attrs.interpolated.is_empty());
         assert!(attrs.interpolated_unresolved.is_empty());
-        assert!(attrs.parsed.source_ranges.contains_key("url"));
-        assert!(attrs.parsed.source_ranges.contains_key("rev"));
+        assert!(attrs.parsed.has_string("url"));
+        assert!(attrs.parsed.has_string("rev"));
     }
 
     #[test]
@@ -873,12 +862,13 @@ stdenv.mkDerivation rec {
             super::FetcherKind::FetchGit,
             &attr_set,
             &super::InterpolationSpec::none(),
-        );
+        )
+        .unwrap();
         assert!(!attrs.parsed.strings.contains_key("url"));
         assert_eq!(attrs.interpolated_unresolved, vec!["url"]);
         assert_eq!(attrs.parsed.strings.get("rev"), Some(&"v1.0".to_string()));
         assert!(attrs.interpolated.is_empty());
-        assert!(attrs.parsed.source_ranges.contains_key("url"));
+        assert!(attrs.parsed.has_string("url"));
     }
 
     #[test]
@@ -894,7 +884,8 @@ stdenv.mkDerivation rec {
             "rev",
             HashMap::from([("version".to_string(), "1.0".to_string())]),
         );
-        let attrs = super::parse_fetcher_attrset(super::FetcherKind::FetchGit, &attr_set, &spec);
+        let attrs =
+            super::parse_fetcher_attrset(super::FetcherKind::FetchGit, &attr_set, &spec).unwrap();
         assert!(attrs.interpolated.contains_key("rev"));
         assert!(attrs.interpolated_unresolved.is_empty());
         assert!(!attrs.parsed.strings.contains_key("rev"));
@@ -917,7 +908,8 @@ stdenv.mkDerivation rec {
             "rev",
             HashMap::from([("version".to_string(), "1.0".to_string())]),
         );
-        let attrs = super::parse_fetcher_attrset(super::FetcherKind::FetchGit, &attr_set, &spec);
+        let attrs =
+            super::parse_fetcher_attrset(super::FetcherKind::FetchGit, &attr_set, &spec).unwrap();
         assert!(attrs.interpolated.is_empty());
         assert_eq!(attrs.interpolated_unresolved, vec!["rev"]);
     }
@@ -938,7 +930,8 @@ stdenv.mkDerivation rec {
                 ("finalAttrs.version".to_string(), "1.0".to_string()),
             ]),
         );
-        let attrs = super::parse_fetcher_attrset(super::FetcherKind::FetchGit, &attr_set, &spec);
+        let attrs =
+            super::parse_fetcher_attrset(super::FetcherKind::FetchGit, &attr_set, &spec).unwrap();
         assert!(attrs.interpolated.contains_key("rev"));
         assert!(attrs.interpolated_unresolved.is_empty());
         assert!(!attrs.parsed.strings.contains_key("rev"));
@@ -961,7 +954,8 @@ stdenv.mkDerivation rec {
                 ("finalAttrs.version".to_string(), "1.0".to_string()),
             ]),
         );
-        let attrs = super::parse_fetcher_attrset(super::FetcherKind::FetchGit, &attr_set, &spec);
+        let attrs =
+            super::parse_fetcher_attrset(super::FetcherKind::FetchGit, &attr_set, &spec).unwrap();
         assert!(attrs.interpolated.contains_key("rev"));
         assert!(attrs.interpolated_unresolved.is_empty());
         assert!(!attrs.parsed.strings.contains_key("rev"));
@@ -1098,7 +1092,8 @@ stdenv.mkDerivation (finalAttrs: {
         let mut spec = super::InterpolationSpec::none();
         spec.allow_idents(HashMap::from([("pname".to_string(), "my-pkg".to_string())]));
         let attrs =
-            super::parse_fetcher_attrset(super::FetcherKind::FetchFromGitHub, &attr_set, &spec);
+            super::parse_fetcher_attrset(super::FetcherKind::FetchFromGitHub, &attr_set, &spec)
+                .unwrap();
         assert_eq!(
             attrs.parsed.strings.get("repo"),
             Some(&"my-pkg".to_string())
@@ -1111,7 +1106,7 @@ stdenv.mkDerivation (finalAttrs: {
     }
 
     #[test]
-    fn test_parse_fetcher_attrset_ident_not_in_idents_ignored() {
+    fn test_parse_fetcher_attrset_ident_not_in_idents_returns_error() {
         let content = r#"{ repo = pname; owner = "test-org"; }"#;
         let root = parse_root(content);
         let attr_set = root
@@ -1119,13 +1114,9 @@ stdenv.mkDerivation (finalAttrs: {
             .find(|n| n.kind() == rnix::SyntaxKind::NODE_ATTR_SET)
             .unwrap();
         let spec = super::InterpolationSpec::none();
-        let attrs =
+        let result =
             super::parse_fetcher_attrset(super::FetcherKind::FetchFromGitHub, &attr_set, &spec);
-        assert!(!attrs.parsed.strings.contains_key("repo"));
-        assert_eq!(
-            attrs.parsed.strings.get("owner"),
-            Some(&"test-org".to_string())
-        );
+        assert!(result.is_err());
     }
 
     #[test]
@@ -1139,7 +1130,8 @@ stdenv.mkDerivation (finalAttrs: {
         let mut spec = super::InterpolationSpec::none();
         spec.allow_all(HashMap::from([("pname".to_string(), "foo".to_string())]));
         let attrs =
-            super::parse_fetcher_attrset(super::FetcherKind::FetchFromGitHub, &attr_set, &spec);
+            super::parse_fetcher_attrset(super::FetcherKind::FetchFromGitHub, &attr_set, &spec)
+                .unwrap();
         assert!(attrs.interpolated.contains_key("owner"));
         assert!(!attrs.interpolated_unresolved.iter().any(|k| k == "owner"));
         assert_eq!(attrs.parsed.strings.get("rev"), Some(&"v1.0.0".to_string()));
@@ -1160,7 +1152,8 @@ stdenv.mkDerivation (finalAttrs: {
             HashMap::from([("version".to_string(), "1.0".to_string())]),
         );
         let attrs =
-            super::parse_fetcher_attrset(super::FetcherKind::FetchFromGitHub, &attr_set, &spec);
+            super::parse_fetcher_attrset(super::FetcherKind::FetchFromGitHub, &attr_set, &spec)
+                .unwrap();
         assert!(attrs.interpolated.contains_key("rev"));
         assert!(attrs.interpolated.contains_key("owner"));
         assert!(attrs.interpolated_unresolved.is_empty());

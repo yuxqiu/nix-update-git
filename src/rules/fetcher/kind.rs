@@ -350,7 +350,7 @@ const SPEC_GITHUB: [AttrSpec; 16] = [
     },
 ];
 
-const SPEC_GITLAB: [AttrSpec; 15] = [
+const SPEC_GITLAB: [AttrSpec; 16] = [
     AttrSpec {
         key: "owner",
         attr_type: AttrType::String,
@@ -410,6 +410,10 @@ const SPEC_GITLAB: [AttrSpec; 15] = [
     AttrSpec {
         key: "sparseCheckout",
         attr_type: AttrType::ListString,
+    },
+    AttrSpec {
+        key: "forceFetchGit",
+        attr_type: AttrType::Bool,
     },
 ];
 
@@ -480,7 +484,7 @@ const SPEC_GITEA_FORGEJO: [AttrSpec; 16] = [
     },
 ];
 
-const SPEC_CODEBERG: [AttrSpec; 14] = [
+const SPEC_CODEBERG: [AttrSpec; 15] = [
     AttrSpec {
         key: "owner",
         attr_type: AttrType::String,
@@ -536,6 +540,10 @@ const SPEC_CODEBERG: [AttrSpec; 14] = [
     AttrSpec {
         key: "sparseCheckout",
         attr_type: AttrType::ListString,
+    },
+    AttrSpec {
+        key: "forceFetchGit",
+        attr_type: AttrType::Bool,
     },
 ];
 
@@ -610,7 +618,7 @@ const SPEC_SOURCEHUT: [AttrSpec; 17] = [
     },
 ];
 
-const SPEC_BITBUCKET: [AttrSpec; 14] = [
+const SPEC_BITBUCKET: [AttrSpec; 15] = [
     AttrSpec {
         key: "owner",
         attr_type: AttrType::String,
@@ -666,6 +674,10 @@ const SPEC_BITBUCKET: [AttrSpec; 14] = [
     AttrSpec {
         key: "sparseCheckout",
         attr_type: AttrType::ListString,
+    },
+    AttrSpec {
+        key: "forceFetchGit",
+        attr_type: AttrType::Bool,
     },
 ];
 
@@ -814,6 +826,7 @@ const SPEC_BUILTINS_FETCH_GIT: [AttrSpec; 6] = [
     },
 ];
 
+// TODO: handle more keys like `name`, ...
 const SPEC_FETCH_PATCH: [AttrSpec; 12] = [
     AttrSpec {
         key: "url",

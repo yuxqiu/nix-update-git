@@ -217,7 +217,10 @@ impl FlakeInputRule {
                     let input_name = segments[1].clone();
                     if let Some(value) = node.attr_value() {
                         if value.kind() == rnix::SyntaxKind::NODE_ATTR_SET {
-                            let parsed = value.parse_attrs(FLAKE_INPUT_ATTR_SPEC, None);
+                            let parsed = match value.parse_attrs(FLAKE_INPUT_ATTR_SPEC, None) {
+                                Ok(p) => p,
+                                Err(_) => continue,
+                            };
                             let pinned = value.has_pin_comment() || node.has_pin_comment();
                             let url = parsed.string_nodes.get("url").and_then(|n| {
                                 n.pure_string_content().map(|v| SourceValue {
@@ -336,7 +339,10 @@ impl FlakeInputRule {
             if segments.len() == 1 {
                 if let Some(value) = entry.attr_value() {
                     if value.kind() == rnix::SyntaxKind::NODE_ATTR_SET {
-                        let parsed = value.parse_attrs(FLAKE_INPUT_ATTR_SPEC, None);
+                        let parsed = match value.parse_attrs(FLAKE_INPUT_ATTR_SPEC, None) {
+                            Ok(p) => p,
+                            Err(_) => continue,
+                        };
                         let pinned = value.has_pin_comment() || entry.has_pin_comment();
                         let url = parsed.string_nodes.get("url").and_then(|n| {
                             n.pure_string_content().map(|v| SourceValue {
