@@ -8,7 +8,23 @@ Each `.nix` file in `data/` is registered as an individual test case (e.g. `fetc
 
 1. **Add a Nix file** in `tests/snapshot/data/<category>/<test_name>.nix`
 
-2. **Run the snapshot tests** to generate the snapshot:
+2. **Verify the Nix expression evaluates correctly** by building it with nixpkgs. This confirms the fetcher URL and hash are valid before running the snapshot test:
+
+   ```bash
+   nix build -L --impure --expr '
+   let
+     wrapped = builtins.toFile "wrapped.nix" (
+       "let pkgs = import <nixpkgs> {}; in\n"
+       + builtins.readFile ./tests/snapshot/data/<category>/<test_name>.nix
+     );
+   in
+     (import wrapped).src
+   '
+   ```
+
+   Replace `<category>/<test_name>.nix` with your actual test file path. Adjust the attribute path (`.src`, `.patch`, etc.) to match what your Nix file exports. A successful build confirms the hash and URL are correct.
+
+3. **Run the snapshot tests** to generate the snapshot:
 
    ```bash
    cargo test --features network-tests --test snapshot
@@ -26,7 +42,7 @@ Each `.nix` file in `data/` is registered as an individual test case (e.g. `fetc
    INSTA_UPDATE=new cargo test --features network-tests --test snapshot
    ```
 
-3. **Verify the snapshot** was created at `tests/snapshot/snaps/<category>/<test_name>.snap`
+4. **Verify the snapshot** was created at `tests/snapshot/snaps/<category>/<test_name>.snap`
 
 ## Test Structure
 

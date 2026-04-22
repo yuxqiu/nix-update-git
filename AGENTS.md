@@ -38,6 +38,26 @@ cargo test --test mod
 
 Nix builds exclude network tests via `cargoTestFlags = [ "--no-default-features" ]` in `flake.nix`.
 
+## Adding snapshot tests
+
+1. Add a `.nix` file in `tests/snapshot/data/<category>/<test_name>.nix`
+2. Verify the Nix expression evaluates correctly with nixpkgs:
+   ```bash
+   nix build -L --impure --expr '
+   let
+     wrapped = builtins.toFile "wrapped.nix" (
+       "let pkgs = import <nixpkgs> {}; in\n"
+       + builtins.readFile ./tests/snapshot/data/<category>/<test_name>.nix
+     );
+   in
+     (import wrapped).src
+   '
+   ```
+   Adjust the attribute path (`.src`, `.patch`, etc.) to match what the Nix file exports.
+3. Run `cargo test --features network-tests --test snapshot` to generate the snapshot. New snapshots land in `tests/snapshot/snaps/<category>/<test_name>.snap`.
+4. To update existing snapshots: `INSTA_UPDATE=always cargo test --features network-tests --test snapshot`.
+5. Add `# redact: field1 field2 ...` on the first line to omit non-deterministic fields (e.g. `new`, `range`) from the snapshot.
+
 ## Architecture
 
 Workspace with two crates. Edition 2024 (requires Rust ≥ 1.85).
@@ -49,9 +69,9 @@ Workspace with two crates. Edition 2024 (requires Rust ≥ 1.85).
 - `src/check.rs` — `FileResult` struct + `check_file()` (read → parse → run rules)
 - `src/output.rs` — `UpdateEntry` (JSON), `print_updates()`, `print_json()`, `select_interactive()`, `prompt_confirmation()`
 - `src/patch.rs` — `apply_updates()` does source-level text splicing with overlap detection
-- `src/parser/ast.rs` — rnix wrapper; `NixFile`, `NixNode`, `TextRange`, `NixError`; `pure_string_content()` uses `rnix::ast::Str::normalized_parts()` for proper escape handling; `interpolated_string_content()` resolves simple interpolations from a variable map; `interpolated_var_affixes()` extracts prefix/suffix around a single target variable interpolation, resolving all other interpolations from a `vars` map; `has_pin_comment()` only checks immediate sibling tokens, not recursive children
+- `src/parser/ast.rs` — rnix wrapper; `NixFile`, `NixNode`, `TextRange`, `NixError`; `pure_string_content()` uses `rnix::ast::Str::normalized_parts()` for proper escape handling; `interpolated_string_content()` resolves simple interpolations from a variable map; `interpolated_var_affixes()` extracts prefix/suffix around a single target variable interpolation, resolving all other interpolations from a `vars` map; `has_pin_comment()` only checks immediate sibling tokens, not recursive children; `parse_attrs()` centralizes attr-set parsing with typed output (`ParsedAttrs`: strings, bools, ints, list_strings, list_ints, source_ranges, unknown_keys)
 - `src/rules/fetcher/mod.rs` — `FetcherRule` struct, `FetcherCall`, `UpdateRule` impl, `try_extract_call` (extracts a single fetcher call from one `NODE_APPLY`), `handle_branch_following`, `handle_version_update`; also handles empty hash filling via `try_prefetch_empty_hash` and hash prefetching via `try_prefetch_hash`; dispatches to `tarball` or `git_fetch` based on `HashStrategy`. `InterpolationSpec` controls which fetcher fields may contain interpolation: `allow()` for field-specific bindings, `allow_all()` for catch-all bindings merged on top, `allow_idents()` for bare ident resolution (e.g. `repo = pname`), and `vars_for_field()` merges `allow_all` + field-specific entries. Exposes shared helpers used by mkDerivation (`is_commit_hash`, `preferred_ref_key`, `resolve_ref_for_prefetch`, `version_ref_key_and_value`).
-- `src/rules/fetcher/kind.rs` — `FetcherKind` enum (all fetcher variants) and `HashStrategy` enum; methods for name lookup, URL construction, tarball/submodule detection, and hash strategy dispatch
+- `src/rules/fetcher/kind.rs` — `FetcherKind` enum (all fetcher variants including `FetchPatch`) and `HashStrategy` enum; per-kind `attr_spec()` returns the typed attribute schema; `operational_keys()` derives from the spec; methods for name lookup, URL construction, tarball/submodule detection, and hash strategy dispatch
 - `src/rules/fetcher/tarball.rs` — `compute_hash()` for tarball-based fetchers (GitHub, GitLab, Gitea, Forgejo, Codeberg, SourceHut, Bitbucket, Gitiles, RepoOrCz); constructs tarball URLs and delegates to `TarballHasher`
 - `src/rules/fetcher/git_fetch.rs` — `compute_hash()` for git-based fetchers; builds `PrefetchArgs` from fetcher params and delegates to `nix_prefetch_git::prefetch`
 - `src/rules/mk_derivation.rs` — `MkDerivationRule` handles `stdenv.mkDerivation rec { version = "..."; src = fetchX { ... }; }` patterns. It resolves source refs with precedence `tag > rev > ref` (pure, `${version}`-interpolated, or multi-variable e.g. `${pname}-${version}`), derives updates from that source ref when possible, propagates to `version`, and refreshes `hash`/`sha256` when ref/effective ref changes or hash is empty. Fetcher attributes may reference `pname` and other pure string attributes from the `mkDerivation` attrset via bare idents (e.g. `repo = pname`) or string interpolation (e.g. `owner = "${pname}-org"`) when the attrset is `rec` or lambda-wrapped; these are resolved into concrete values for URL construction and hash computation.
