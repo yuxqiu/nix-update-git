@@ -225,15 +225,18 @@ impl FetcherRule {
 
     fn check_fetchpatch_call(call: &FetcherCall) -> Result<Option<Vec<Update>>> {
         let url = match call.parsed.strings.get("url") {
-            Some(url) => url,
-            None => return Ok(None),
+            Some(url) => url.clone(),
+            None => match call.parsed.pure_string_list("urls") {
+                Some(urls) if !urls.is_empty() => urls[0].clone(),
+                _ => return Ok(None),
+            },
         };
 
         let mut updates = Vec::new();
         let mut current_url = url.clone();
         let mut url_changed = false;
 
-        let parsed_url = patch_url::parse_patch_url(url);
+        let parsed_url = patch_url::parse_patch_url(&url);
 
         if let Some(branch) = &call.follow_branch {
             if let Some(parsed) = &parsed_url {
@@ -294,6 +297,48 @@ impl FetcherRule {
             .get("postFetch")
             .is_some_and(|p| !p.is_empty());
 
+        let has_curl_opts = call
+            .parsed
+            .strings
+            .get("curlOpts")
+            .is_some_and(|o| !o.is_empty());
+
+        let has_curl_opts_list = call
+            .parsed
+            .pure_string_list("curlOptsList")
+            .is_some_and(|v| !v.is_empty());
+
+        let has_netrc_phase = call
+            .parsed
+            .strings
+            .get("netrcPhase")
+            .is_some_and(|p| !p.is_empty());
+
+        let has_netrc_impure_env_vars = call
+            .parsed
+            .pure_string_list("netrcImpureEnvVars")
+            .is_some_and(|v| !v.is_empty());
+
+        let has_recursive_hash = call.parsed.bools.get("recursiveHash").is_some_and(|&v| v);
+
+        let has_show_urls = call.parsed.bools.get("showURLs").is_some_and(|&v| v);
+
+        let has_non_sha256_hash_algo = call
+            .parsed
+            .strings
+            .get("sha1")
+            .is_some_and(|h| !h.is_empty())
+            || call
+                .parsed
+                .strings
+                .get("sha512")
+                .is_some_and(|h| !h.is_empty())
+            || call
+                .parsed
+                .strings
+                .get("outputHashAlgo")
+                .is_some_and(|a| a != "sha256");
+
         let decode = call
             .parsed
             .strings
@@ -312,13 +357,26 @@ impl FetcherRule {
                 .parsed
                 .strings
                 .get("sha256")
+                .is_some_and(|h| h.is_empty())
+            || call
+                .parsed
+                .strings
+                .get("outputHash")
                 .is_some_and(|h| h.is_empty()))
             && !has_post_fetch
+            && !has_curl_opts
+            && !has_curl_opts_list
+            && !has_netrc_phase
+            && !has_netrc_impure_env_vars
+            && !has_recursive_hash
+            && !has_show_urls
+            && !has_non_sha256_hash_algo
             && can_decode;
 
         if needs_hash {
-            let has_hash_source =
-                call.parsed.has_string("hash") || call.parsed.has_string("sha256");
+            let has_hash_source = call.parsed.has_string("hash")
+                || call.parsed.has_string("sha256")
+                || call.parsed.has_string("outputHash");
 
             if has_hash_source {
                 let options = crate::utils::PatchOptions {
@@ -349,6 +407,13 @@ impl FetcherRule {
                             updates.push(Update::new(
                                 format!("{}.sha256", call.kind.name()),
                                 format!("\"{}\"", nar_hash.nix32),
+                                range,
+                            ));
+                        }
+                        if let Some(range) = call.parsed.string_range("outputHash") {
+                            updates.push(Update::new(
+                                format!("{}.outputHash", call.kind.name()),
+                                format!("\"{}\"", nar_hash.sri),
                                 range,
                             ));
                         }

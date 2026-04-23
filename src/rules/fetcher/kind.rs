@@ -826,11 +826,14 @@ const SPEC_BUILTINS_FETCH_GIT: [AttrSpec; 6] = [
     },
 ];
 
-// TODO: handle more keys like `name`, ...
-const SPEC_FETCH_PATCH: [AttrSpec; 12] = [
+const SPEC_FETCH_PATCH: [AttrSpec; 28] = [
     AttrSpec {
         key: "url",
         attr_type: AttrType::String,
+    },
+    AttrSpec {
+        key: "urls",
+        attr_type: AttrType::ListString,
     },
     AttrSpec {
         key: "hash",
@@ -838,6 +841,34 @@ const SPEC_FETCH_PATCH: [AttrSpec; 12] = [
     },
     AttrSpec {
         key: "sha256",
+        attr_type: AttrType::String,
+    },
+    AttrSpec {
+        key: "sha1",
+        attr_type: AttrType::String,
+    },
+    AttrSpec {
+        key: "sha512",
+        attr_type: AttrType::String,
+    },
+    AttrSpec {
+        key: "outputHash",
+        attr_type: AttrType::String,
+    },
+    AttrSpec {
+        key: "outputHashAlgo",
+        attr_type: AttrType::String,
+    },
+    AttrSpec {
+        key: "name",
+        attr_type: AttrType::String,
+    },
+    AttrSpec {
+        key: "pname",
+        attr_type: AttrType::String,
+    },
+    AttrSpec {
+        key: "version",
         attr_type: AttrType::String,
     },
     AttrSpec {
@@ -875,6 +906,38 @@ const SPEC_FETCH_PATCH: [AttrSpec; 12] = [
     AttrSpec {
         key: "postFetch",
         attr_type: AttrType::String,
+    },
+    AttrSpec {
+        key: "curlOpts",
+        attr_type: AttrType::String,
+    },
+    AttrSpec {
+        key: "curlOptsList",
+        attr_type: AttrType::ListString,
+    },
+    AttrSpec {
+        key: "downloadToTemp",
+        attr_type: AttrType::Bool,
+    },
+    AttrSpec {
+        key: "executable",
+        attr_type: AttrType::Bool,
+    },
+    AttrSpec {
+        key: "showURLs",
+        attr_type: AttrType::Bool,
+    },
+    AttrSpec {
+        key: "recursiveHash",
+        attr_type: AttrType::Bool,
+    },
+    AttrSpec {
+        key: "netrcPhase",
+        attr_type: AttrType::String,
+    },
+    AttrSpec {
+        key: "netrcImpureEnvVars",
+        attr_type: AttrType::ListString,
     },
 ];
 

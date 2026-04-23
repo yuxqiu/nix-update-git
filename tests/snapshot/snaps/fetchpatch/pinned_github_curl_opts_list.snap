@@ -1,0 +1,6 @@
+---
+source: tests/snapshot/main.rs
+expression: output_for_insta
+input_file: tests/snapshot/data/fetchpatch/pinned_github_curl_opts_list.nix
+---
+[]
