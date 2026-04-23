@@ -25,6 +25,7 @@ struct MkDerivationCall {
 enum SourceRefValue {
     Missing,
     Pure(String),
+    IdentFromVersion,
     InterpolatedFromVersion {
         template_node: NixNode,
         version_var: String,
@@ -110,13 +111,21 @@ impl MkDerivationRule {
                 ident_vars.insert(key.clone(), value.clone());
                 interpolation_vars.insert(key.clone(), value.clone());
             }
+            ident_vars.insert("version".to_string(), version_content.clone());
         }
         if let Some(ref param) = lambda_param {
             for (key, value) in &stable_attrs {
-                ident_vars.insert(key.clone(), value.clone());
+                if is_recursive {
+                    ident_vars.insert(key.clone(), value.clone());
+                }
                 let dotted = format!("{}.{}", param, key);
                 interpolation_vars.insert(dotted, value.clone());
             }
+            if is_recursive {
+                ident_vars.insert("version".to_string(), version_content.clone());
+            }
+            let dotted_version = format!("{}.version", param);
+            ident_vars.insert(dotted_version, version_content.clone());
         }
 
         let mut spec = InterpolationSpec::none();
@@ -182,7 +191,11 @@ impl MkDerivationRule {
             });
 
         let source_ref_value = if let Some(key) = &source_ref_key {
-            if let Some(value) = attrs.parsed.strings.get(key) {
+            if let Some(ident_name) = attrs.parsed.ident_resolved.get(key)
+                && version_vars.iter().any(|v| v == ident_name)
+            {
+                SourceRefValue::IdentFromVersion
+            } else if let Some(value) = attrs.parsed.strings.get(key) {
                 SourceRefValue::Pure(value.clone())
             } else if let Some(template_node) = attrs.interpolated.remove(key) {
                 let detected_var = version_vars
@@ -339,6 +352,16 @@ impl MkDerivationRule {
                     effective_ref_changed = true;
                 }
             }
+            SourceRefValue::IdentFromVersion => {
+                if let Some(latest) =
+                    GitFetcher::get_latest_tag_matching(&git_url, Some(&call.version_value))?
+                    && VersionDetector::compare(&call.version_value, &latest)
+                        == std::cmp::Ordering::Less
+                {
+                    target_version = latest;
+                    effective_ref_changed = true;
+                }
+            }
             SourceRefValue::Missing => {}
         }
 
@@ -396,6 +419,9 @@ impl MkDerivationRule {
                         template_node
                             .interpolated_string_content(&vars)
                             .and_then(|resolved| resolve_ref_for_prefetch(&git_url, &resolved))
+                    }
+                    SourceRefValue::IdentFromVersion => {
+                        resolve_ref_for_prefetch(&git_url, &target_version)
                     }
                     SourceRefValue::Missing => None,
                 }

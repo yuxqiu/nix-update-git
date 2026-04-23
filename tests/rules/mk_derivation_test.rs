@@ -1104,3 +1104,270 @@ fn test_mk_derivation_no_pname_skips_interpolated_url() {
         stdout
     );
 }
+
+#[test]
+fn test_mk_derivation_ident_rev_updates_version_and_hash() {
+    let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
+
+    let nix_content = format!(
+        r#"{{
+  foo = stdenv.mkDerivation rec {{
+    version = "v1.0.0";
+    src = fetchgit {{
+      url = "{}";
+      rev = version;
+      hash = "";
+    }};
+  }};
+}}"#,
+        repo.path_str()
+    );
+
+    let nix_dir = tempdir().unwrap();
+    let nix_path = nix_dir.path().join("test.nix");
+    fs::write(&nix_path, &nix_content).unwrap();
+
+    let out = Command::cargo_bin("nix-update-git")
+        .unwrap()
+        .arg(nix_path.to_str().unwrap())
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("mkDerivation.version"),
+        "should detect version update, stdout: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("fetchgit.hash"),
+        "should refresh hash, stdout: {}",
+        stdout
+    );
+    assert!(
+        !stdout.contains("fetchgit.rev"),
+        "should NOT produce rev update (ident tracks version), stdout: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_mk_derivation_ident_rev_with_existing_hash() {
+    let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
+
+    let nix_content = format!(
+        r#"{{
+  foo = stdenv.mkDerivation rec {{
+    version = "v1.0.0";
+    src = fetchgit {{
+      url = "{}";
+      rev = version;
+      sha256 = "0nmyp5yrzl9dbq85wyiimsj9fklb8637a1936nw7zzvlnzkgh28n";
+    }};
+  }};
+}}"#,
+        repo.path_str()
+    );
+
+    let nix_dir = tempdir().unwrap();
+    let nix_path = nix_dir.path().join("test.nix");
+    fs::write(&nix_path, &nix_content).unwrap();
+
+    let mut cmd = Command::cargo_bin("nix-update-git").unwrap();
+    cmd.arg(nix_path.to_str().unwrap());
+    cmd.assert()
+        .success()
+        .stdout(predicates::str::contains("mkDerivation.version"))
+        .stdout(predicates::str::contains("fetchgit.sha256"));
+}
+
+#[test]
+fn test_mk_derivation_ident_tag_updates_version_and_hash() {
+    let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
+
+    let nix_content = format!(
+        r#"{{
+  foo = stdenv.mkDerivation rec {{
+    version = "v1.0.0";
+    src = fetchgit {{
+      url = "{}";
+      tag = version;
+      hash = "";
+    }};
+  }};
+}}"#,
+        repo.path_str()
+    );
+
+    let nix_dir = tempdir().unwrap();
+    let nix_path = nix_dir.path().join("test.nix");
+    fs::write(&nix_path, &nix_content).unwrap();
+
+    let out = Command::cargo_bin("nix-update-git")
+        .unwrap()
+        .arg(nix_path.to_str().unwrap())
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("mkDerivation.version"),
+        "should detect version update, stdout: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("fetchgit.hash"),
+        "should refresh hash, stdout: {}",
+        stdout
+    );
+    assert!(
+        !stdout.contains("fetchgit.tag"),
+        "should NOT produce tag update (ident tracks version), stdout: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_mk_derivation_ident_rev_no_update_when_latest() {
+    let repo = TestRepo::new(&["v1.0.0"]);
+
+    let nix_content = format!(
+        r#"{{
+  foo = stdenv.mkDerivation rec {{
+    version = "v1.0.0";
+    src = fetchgit {{
+      url = "{}";
+      rev = version;
+      hash = "";
+    }};
+  }};
+}}"#,
+        repo.path_str()
+    );
+
+    let nix_dir = tempdir().unwrap();
+    let nix_path = nix_dir.path().join("test.nix");
+    fs::write(&nix_path, &nix_content).unwrap();
+
+    let out = Command::cargo_bin("nix-update-git")
+        .unwrap()
+        .arg(nix_path.to_str().unwrap())
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        !stdout.contains("mkDerivation.version"),
+        "should not detect update when already latest, stdout: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_mk_derivation_ident_rev_lambda_wrapped_dotted() {
+    let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
+
+    let nix_content = format!(
+        r#"{{
+  foo = stdenv.mkDerivation (finalAttrs: {{
+    version = "v1.0.0";
+    src = fetchgit {{
+      url = "{}";
+      rev = finalAttrs.version;
+      hash = "";
+    }};
+  }});
+}}"#,
+        repo.path_str()
+    );
+
+    let nix_dir = tempdir().unwrap();
+    let nix_path = nix_dir.path().join("test.nix");
+    fs::write(&nix_path, &nix_content).unwrap();
+
+    let out = Command::cargo_bin("nix-update-git")
+        .unwrap()
+        .arg(nix_path.to_str().unwrap())
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("mkDerivation.version"),
+        "should detect version update with dotted ident, stdout: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("fetchgit.hash"),
+        "should refresh hash with dotted ident, stdout: {}",
+        stdout
+    );
+    assert!(
+        !stdout.contains("fetchgit.rev"),
+        "should NOT produce rev update (dotted ident tracks version), stdout: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_mk_derivation_ident_rev_lambda_no_rec_bare_version_unresolved() {
+    let repo = TestRepo::new(&["v1.0.0", "v2.0.0"]);
+
+    // Without rec, bare `version` is not in scope inside the lambda,
+    // so `rev = version;` should cause the fetcher call to be skipped.
+    let nix_content = format!(
+        r#"{{
+  foo = stdenv.mkDerivation (finalAttrs: {{
+    version = "v1.0.0";
+    src = fetchgit {{
+      url = "{}";
+      rev = version;
+      hash = "";
+    }};
+  }});
+}}"#,
+        repo.path_str()
+    );
+
+    let nix_dir = tempdir().unwrap();
+    let nix_path = nix_dir.path().join("test.nix");
+    fs::write(&nix_path, &nix_content).unwrap();
+
+    let out = Command::cargo_bin("nix-update-git")
+        .unwrap()
+        .arg(nix_path.to_str().unwrap())
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        !stdout.contains("mkDerivation.version"),
+        "bare ident 'version' should not resolve without rec, stdout: {}",
+        stdout
+    );
+}

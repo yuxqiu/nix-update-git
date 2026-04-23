@@ -613,6 +613,50 @@ fn test_parse_attrs_ident_resolution() {
     let parsed = attr_set.parse_attrs(spec, Some(&ident_vars)).unwrap();
     assert_eq!(parsed.strings.get("repo"), Some(&"my-pkg".to_string()));
     assert_eq!(parsed.strings.get("owner"), Some(&"test-org".to_string()));
+    assert_eq!(
+        parsed.ident_resolved.get("repo"),
+        Some(&"pname".to_string())
+    );
+    assert!(!parsed.ident_resolved.contains_key("owner"));
+}
+
+#[test]
+fn test_parse_attrs_select_resolution() {
+    let content = r#"{ rev = finalAttrs.version; owner = "test-org"; }"#;
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    let spec = &[
+        AttrSpec {
+            key: "rev",
+            attr_type: AttrType::String,
+        },
+        AttrSpec {
+            key: "owner",
+            attr_type: AttrType::String,
+        },
+    ];
+    let ident_vars = HashMap::from([("finalAttrs.version".to_string(), "1.0.0".to_string())]);
+    let parsed = attr_set.parse_attrs(spec, Some(&ident_vars)).unwrap();
+    assert_eq!(parsed.strings.get("rev"), Some(&"1.0.0".to_string()));
+    assert_eq!(parsed.strings.get("owner"), Some(&"test-org".to_string()));
+    assert_eq!(
+        parsed.ident_resolved.get("rev"),
+        Some(&"finalAttrs.version".to_string())
+    );
+    assert!(!parsed.ident_resolved.contains_key("owner"));
+}
+
+#[test]
+fn test_parse_attrs_select_not_in_vars_returns_error() {
+    let content = r#"{ rev = finalAttrs.version; }"#;
+    let root = parse(content);
+    let attr_set = find_attr_set(&root).unwrap();
+    let spec = &[AttrSpec {
+        key: "rev",
+        attr_type: AttrType::String,
+    }];
+    let result = attr_set.parse_attrs(spec, None::<&HashMap<String, String>>);
+    assert!(result.is_err());
 }
 
 #[test]

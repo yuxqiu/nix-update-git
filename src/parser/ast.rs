@@ -347,6 +347,7 @@ impl NixNode {
         let mut list_strings: HashMap<String, Vec<NixNode>> = HashMap::new();
         let mut list_ints: HashMap<String, Vec<i64>> = HashMap::new();
         let mut string_nodes: HashMap<String, NixNode> = HashMap::new();
+        let mut ident_resolved: HashMap<String, String> = HashMap::new();
         let mut unknown_keys: Vec<String> = Vec::new();
 
         for child in self.children() {
@@ -382,12 +383,28 @@ impl NixNode {
                                 } else if let Some(iv) = ident_vars
                                     && let Some(resolved) = iv.get(trimmed.as_str())
                                 {
-                                    strings.insert(key, resolved.clone());
+                                    strings.insert(key.clone(), resolved.clone());
+                                    ident_resolved.insert(key, trimmed);
                                 } else {
                                     return Err(anyhow!(
                                         "key \"{}\" expected string but found ident '{}'",
                                         key,
                                         trimmed
+                                    ));
+                                }
+                            } else if actual_kind == rnix::SyntaxKind::NODE_SELECT {
+                                let parts = collect_select_path(&value.node);
+                                let dotted = parts.join(".");
+                                if let Some(iv) = ident_vars
+                                    && let Some(resolved) = iv.get(dotted.as_str())
+                                {
+                                    strings.insert(key.clone(), resolved.clone());
+                                    ident_resolved.insert(key, dotted);
+                                } else {
+                                    return Err(anyhow!(
+                                        "key \"{}\" expected string but found select '{}'",
+                                        key,
+                                        dotted
                                     ));
                                 }
                             } else {
@@ -519,6 +536,7 @@ impl NixNode {
             list_strings,
             list_ints,
             string_nodes,
+            ident_resolved,
             unknown_keys,
         })
     }
@@ -647,6 +665,7 @@ pub struct ParsedAttrs {
     pub list_strings: HashMap<String, Vec<NixNode>>,
     pub list_ints: HashMap<String, Vec<i64>>,
     pub string_nodes: HashMap<String, NixNode>,
+    pub ident_resolved: HashMap<String, String>,
     pub unknown_keys: Vec<String>,
 }
 

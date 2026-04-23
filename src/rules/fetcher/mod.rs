@@ -1185,6 +1185,33 @@ stdenv.mkDerivation (finalAttrs: {
     }
 
     #[test]
+    fn test_parse_fetcher_attrset_select_resolution() {
+        let content = r#"{ rev = finalAttrs.version; owner = "test-org"; }"#;
+        let root = parse_root(content);
+        let attr_set = root
+            .traverse()
+            .find(|n| n.kind() == rnix::SyntaxKind::NODE_ATTR_SET)
+            .unwrap();
+        let mut spec = super::InterpolationSpec::none();
+        spec.allow_idents(HashMap::from([(
+            "finalAttrs.version".to_string(),
+            "1.0.0".to_string(),
+        )]));
+        let attrs =
+            super::parse_fetcher_attrset(super::FetcherKind::FetchFromGitHub, &attr_set, &spec)
+                .unwrap();
+        assert_eq!(attrs.parsed.strings.get("rev"), Some(&"1.0.0".to_string()));
+        assert_eq!(
+            attrs.parsed.strings.get("owner"),
+            Some(&"test-org".to_string())
+        );
+        assert_eq!(
+            attrs.parsed.ident_resolved.get("rev"),
+            Some(&"finalAttrs.version".to_string())
+        );
+    }
+
+    #[test]
     fn test_parse_fetcher_attrset_allow_all_interpolation() {
         let content = r#"{ owner = "${pname}-org"; rev = "v1.0.0"; }"#;
         let root = parse_root(content);
