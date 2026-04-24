@@ -7,7 +7,7 @@ Update git references in Nix flake files and Nix expressions.
 ## Features
 
 - **Flake inputs**: update `ref` values and inline `?ref=` in URL strings
-- **Fetcher calls**: update `rev`, `tag`, and `ref` in `fetchgit`, `fetchFromGitHub`, `fetchFromGitLab`, `fetchFromGitea`, `fetchFromForgejo`, `fetchFromCodeberg`, `fetchFromSourcehut`, `fetchFromBitbucket`, `fetchFromRepoOrCz`, `fetchFromGitiles`, `fetchpatch`, and `builtins.fetchGit`
+- **Fetcher calls**: update `rev`, `tag`, and `ref` in `fetchgit`, `fetchFromGitHub`, `fetchFromGitLab`, `fetchFromGitea`, `fetchFromForgejo`, `fetchFromCodeberg`, `fetchFromSourcehut`, `fetchFromBitbucket`, `fetchFromRepoOrCz`, `fetchFromGitiles`, `fetchpatch`, `fetchTarball`, and `builtins.fetchGit`
 - **mkDerivation**: update `version` and corresponding source ref (`tag`/`rev`/`ref`) and hash in `stdenv.mkDerivation rec { ... }` patterns
 - **Branch following**: use `# follow:branch <name>` comments to track a branch's latest commit instead of version tags
 - **Pinning**: `# pin` comments on any input or fetcher call skips it entirely
@@ -130,7 +130,7 @@ src = pkgs.fetchFromGitHub {
 };
 ```
 
-All standard nixpkgs fetchers are supported (`fetchgit`, `fetchFromGitHub`, `fetchFromGitLab`, `fetchFromGitea`, `fetchFromForgejo`, `fetchFromCodeberg`, `fetchFromSourcehut`, `fetchFromBitbucket`, `fetchFromGitiles`, `fetchFromRepoOrCz`, `fetchpatch`, `builtins.fetchGit`).
+All standard nixpkgs fetchers are supported (`fetchgit`, `fetchFromGitHub`, `fetchFromGitLab`, `fetchFromGitea`, `fetchFromForgejo`, `fetchFromCodeberg`, `fetchFromSourcehut`, `fetchFromBitbucket`, `fetchFromGitiles`, `fetchFromRepoOrCz`, `fetchpatch`, `fetchTarball`, `builtins.fetchGit`).
 
 ### mkDerivation
 
@@ -202,10 +202,10 @@ src = fetchgit { # follow:branch master
 
 The `# follow:` directive supports three modes:
 
-| Mode | Syntax | Behavior |
-| --- | --- | --- |
-| Branch | `# follow:branch <name>` | Tracks the latest commit on the given branch |
-| Regex | `# follow:regex <pattern>` | Finds the latest tag matching `^<pattern>$` (full match) and resolves it to a SHA |
+| Mode   | Syntax                          | Behavior                                                                                                                        |
+| ------ | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Branch | `# follow:branch <name>`        | Tracks the latest commit on the given branch                                                                                    |
+| Regex  | `# follow:regex <pattern>`      | Finds the latest tag matching `^<pattern>$` (full match) and resolves it to a SHA                                               |
 | Semver | `# follow:semver <requirement>` | Finds the latest tag whose version (after stripping prefix like `v`) satisfies the semver requirement, and resolves it to a SHA |
 
 Examples:
