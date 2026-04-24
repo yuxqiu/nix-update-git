@@ -1,0 +1,12 @@
+---
+source: tests/snapshot/main.rs
+expression: output_for_insta
+input_file: tests/snapshot/data/fetchtarball/github_archive_zip.nix
+---
+[
+  {
+    "rule": "fetcher",
+    "field": "fetchTarball.url",
+    "old": "\"https://github.com/yuxqiu/nix-update-git/archive/v0.1.0.zip\""
+  }
+]

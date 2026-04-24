@@ -1,0 +1,17 @@
+---
+source: tests/snapshot/main.rs
+expression: output_for_insta
+input_file: tests/snapshot/data/fetchtarball/pinned_github_archive_empty_hash.nix
+---
+[
+  {
+    "rule": "fetcher",
+    "field": "fetchTarball.sha256",
+    "old": "\"\"",
+    "new": "\"026sl2nbq2gk1fysrh0iqg7gh30y97sfaw43qwa0p6pc01m3k1ay\"",
+    "range": [
+      276,
+      278
+    ]
+  }
+]

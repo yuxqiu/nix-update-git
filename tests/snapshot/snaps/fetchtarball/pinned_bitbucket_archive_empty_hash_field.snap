@@ -1,0 +1,17 @@
+---
+source: tests/snapshot/main.rs
+expression: output_for_insta
+input_file: tests/snapshot/data/fetchtarball/pinned_bitbucket_archive_empty_hash_field.nix
+---
+[
+  {
+    "rule": "fetcher",
+    "field": "fetchTarball.hash",
+    "old": "\"\"",
+    "new": "\"sha256-Ap4u1ZQ+75AV+P4wFr4Ov/YqmC5+BrM1cbk60wd6fik=\"",
+    "range": [
+      335,
+      337
+    ]
+  }
+]

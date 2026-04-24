@@ -1,0 +1,17 @@
+---
+source: tests/snapshot/main.rs
+expression: output_for_insta
+input_file: tests/snapshot/data/fetchtarball/bitbucket_archive_version_update.nix
+---
+[
+  {
+    "rule": "fetcher",
+    "field": "fetchTarball.url",
+    "old": "\"https://bitbucket.org/atlassian/atlassian-rest/get/atlassian-rest-parent-8.1.3.tar.gz\""
+  },
+  {
+    "rule": "fetcher",
+    "field": "fetchTarball.sha256",
+    "old": "\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\""
+  }
+]

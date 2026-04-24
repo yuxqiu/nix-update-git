@@ -1,0 +1,17 @@
+---
+source: tests/snapshot/main.rs
+expression: output_for_insta
+input_file: tests/snapshot/data/fetchtarball/pinned_gitlab_archive_empty_hash_field.nix
+---
+[
+  {
+    "rule": "fetcher",
+    "field": "fetchTarball.hash",
+    "old": "\"\"",
+    "new": "\"sha256-GVWLPd9wr3e94kEEJKmOk2ghXAFIB+BiSrK6Qzyr+uk=\"",
+    "range": [
+      320,
+      322
+    ]
+  }
+]

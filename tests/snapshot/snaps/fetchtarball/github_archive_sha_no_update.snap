@@ -1,0 +1,6 @@
+---
+source: tests/snapshot/main.rs
+expression: output_for_insta
+input_file: tests/snapshot/data/fetchtarball/github_archive_sha_no_update.nix
+---
+[]

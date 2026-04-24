@@ -10,7 +10,7 @@ use kind::{FetcherKind, HashStrategy};
 
 pub mod git_fetch;
 pub mod kind;
-pub mod patch_url;
+pub mod source_url;
 pub mod tarball;
 
 enum FollowSpec {
@@ -355,7 +355,7 @@ impl FetcherRule {
         let mut current_url = url.clone();
         let mut url_changed = false;
 
-        let parsed_url = patch_url::parse_patch_url(&url);
+        let parsed_url = source_url::parse_patch_url(&url);
 
         if let Some(follow_str) = &call.follow {
             if let Some(spec) = parse_follow_spec(follow_str) {
@@ -536,6 +536,117 @@ impl FetcherRule {
                     Err(e) => {
                         eprintln!(
                             "Warning: could not prefetch hash for fetchpatch {}: {:#}",
+                            current_url, e
+                        );
+                    }
+                }
+            }
+        }
+
+        if updates.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(updates))
+        }
+    }
+
+    fn check_fetchtarball_call(call: &FetcherCall) -> Result<Option<Vec<Update>>> {
+        let url = match call.parsed.strings.get("url") {
+            Some(url) => url.clone(),
+            None => match call.parsed.pure_string_list("urls") {
+                Some(urls) if !urls.is_empty() => urls[0].clone(),
+                _ => return Ok(None),
+            },
+        };
+
+        let mut updates = Vec::new();
+        let mut current_url = url.clone();
+        let mut url_changed = false;
+
+        let parsed_url = source_url::parse_source_url(&url);
+
+        if let Some(follow_str) = &call.follow {
+            if let Some(spec) = parse_follow_spec(follow_str) {
+                if let Some(parsed) = &parsed_url {
+                    let git_url = parsed.git_remote_url();
+                    match resolve_follow(&spec, &git_url) {
+                        Ok(Some(result)) => {
+                            let current_ref = parsed.current_ref();
+                            if current_ref != result.sha {
+                                current_url = parsed.replace_ref(&result.sha);
+                                url_changed = true;
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(e) => {
+                            eprintln!("Warning: could not resolve follow for {}: {:#}", git_url, e);
+                        }
+                    }
+                }
+            } else {
+                eprintln!("Warning: invalid follow directive: '{}'", follow_str);
+            }
+        } else if !call.pinned
+            && let Some(parsed) = &parsed_url
+            && parsed.is_version_ref()
+        {
+            let git_url = parsed.git_remote_url();
+            let current = parsed.current_ref();
+            if let Ok(Some(latest)) = GitFetcher::get_latest_tag_matching(&git_url, Some(current))
+                && VersionDetector::compare(current, &latest) == std::cmp::Ordering::Less
+            {
+                current_url = parsed.replace_ref(&latest);
+                url_changed = true;
+            }
+        }
+
+        if url_changed && let Some(range) = call.parsed.string_range("url") {
+            updates.push(Update::new(
+                format!("{}.url", call.kind.name()),
+                format!("\"{}\"", current_url),
+                range,
+            ));
+        }
+
+        let needs_hash = (url_changed
+            || call
+                .parsed
+                .strings
+                .get("hash")
+                .is_some_and(|h| h.is_empty())
+            || call
+                .parsed
+                .strings
+                .get("sha256")
+                .is_some_and(|h| h.is_empty()))
+            && call.kind.needs_hash();
+
+        if needs_hash {
+            let has_hash_source =
+                call.parsed.has_string("hash") || call.parsed.has_string("sha256");
+
+            if has_hash_source {
+                let result = crate::utils::TarballHasher::hash_tarball_url(&current_url);
+                match result {
+                    Ok(nar_hash) => {
+                        if let Some(range) = call.parsed.string_range("hash") {
+                            updates.push(Update::new(
+                                format!("{}.hash", call.kind.name()),
+                                format!("\"{}\"", nar_hash.sri),
+                                range,
+                            ));
+                        }
+                        if let Some(range) = call.parsed.string_range("sha256") {
+                            updates.push(Update::new(
+                                format!("{}.sha256", call.kind.name()),
+                                format!("\"{}\"", nar_hash.nix32),
+                                range,
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Warning: could not prefetch hash for fetchTarball {}: {:#}",
                             current_url, e
                         );
                     }
@@ -798,6 +909,7 @@ impl UpdateRule for FetcherRule {
 
         match call.kind {
             FetcherKind::FetchPatch => Self::check_fetchpatch_call(&call),
+            FetcherKind::FetchTarball => Self::check_fetchtarball_call(&call),
             FetcherKind::BuiltinsFetchGit
             | FetcherKind::FetchGit
             | FetcherKind::FetchFromGitHub

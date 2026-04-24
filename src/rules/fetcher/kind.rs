@@ -14,6 +14,7 @@ pub enum FetcherKind {
     FetchFromRepoOrCz,
     BuiltinsFetchGit,
     FetchPatch,
+    FetchTarball,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +42,7 @@ impl FetcherKind {
             "fetchFromRepoOrCz" => Some(Self::FetchFromRepoOrCz),
             "fetchGit" => Some(Self::BuiltinsFetchGit),
             "fetchpatch" => Some(Self::FetchPatch),
+            "fetchTarball" => Some(Self::FetchTarball),
             _ => None,
         }
     }
@@ -59,6 +61,7 @@ impl FetcherKind {
             Self::FetchFromRepoOrCz => "fetchFromRepoOrCz",
             Self::BuiltinsFetchGit => "builtins.fetchGit",
             Self::FetchPatch => "fetchpatch",
+            Self::FetchTarball => "fetchTarball",
         }
     }
 
@@ -73,6 +76,9 @@ impl FetcherKind {
         if matches!(self, Self::FetchPatch) {
             return HashStrategy::Patch;
         }
+        if matches!(self, Self::FetchTarball) {
+            return HashStrategy::Tarball;
+        }
         if self.uses_tarball(parsed, has_sparse_checkout) {
             HashStrategy::Tarball
         } else {
@@ -82,7 +88,9 @@ impl FetcherKind {
 
     pub fn git_url(&self, parsed: &ParsedAttrs) -> Option<String> {
         match self {
-            Self::FetchGit | Self::FetchPatch => parsed.strings.get("url").cloned(),
+            Self::FetchGit | Self::FetchPatch | Self::FetchTarball => {
+                parsed.strings.get("url").cloned()
+            }
             Self::FetchFromGitHub => {
                 let owner = parsed.strings.get("owner")?;
                 let repo = parsed.strings.get("repo")?;
@@ -168,7 +176,7 @@ impl FetcherKind {
             | Self::FetchFromGitiles
             | Self::FetchFromRepoOrCz => parsed.bools.get("fetchSubmodules").is_some_and(|&v| v),
             Self::BuiltinsFetchGit => parsed.bools.get("submodules").is_some_and(|&v| v),
-            Self::FetchPatch => false,
+            Self::FetchPatch | Self::FetchTarball => false,
         }
     }
 
@@ -193,7 +201,7 @@ impl FetcherKind {
                     || has_sparse_checkout
             }
             Self::BuiltinsFetchGit => true,
-            Self::FetchPatch => false,
+            Self::FetchPatch | Self::FetchTarball => false,
         }
     }
 
@@ -210,6 +218,7 @@ impl FetcherKind {
             Self::FetchFromGitiles => &SPEC_GITILES,
             Self::FetchFromRepoOrCz => &SPEC_REPO_OR_CZ,
             Self::BuiltinsFetchGit => &SPEC_BUILTINS_FETCH_GIT,
+            Self::FetchTarball => &SPEC_FETCH_TARBALL,
         }
     }
 
@@ -941,6 +950,29 @@ const SPEC_FETCH_PATCH: [AttrSpec; 28] = [
     },
 ];
 
+const SPEC_FETCH_TARBALL: [AttrSpec; 5] = [
+    AttrSpec {
+        key: "url",
+        attr_type: AttrType::String,
+    },
+    AttrSpec {
+        key: "urls",
+        attr_type: AttrType::ListString,
+    },
+    AttrSpec {
+        key: "sha256",
+        attr_type: AttrType::String,
+    },
+    AttrSpec {
+        key: "hash",
+        attr_type: AttrType::String,
+    },
+    AttrSpec {
+        key: "name",
+        attr_type: AttrType::String,
+    },
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -987,6 +1019,10 @@ mod tests {
         assert_eq!(
             FetcherKind::from_name("pkgs.fetchpatch"),
             Some(FetcherKind::FetchPatch)
+        );
+        assert_eq!(
+            FetcherKind::from_name("fetchTarball"),
+            Some(FetcherKind::FetchTarball)
         );
         assert_eq!(FetcherKind::from_name("unknown"), None);
         assert_eq!(FetcherKind::from_name("pkgs.unknown"), None);

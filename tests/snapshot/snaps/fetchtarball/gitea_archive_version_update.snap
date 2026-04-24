@@ -1,0 +1,17 @@
+---
+source: tests/snapshot/main.rs
+expression: output_for_insta
+input_file: tests/snapshot/data/fetchtarball/gitea_archive_version_update.nix
+---
+[
+  {
+    "rule": "fetcher",
+    "field": "fetchTarball.url",
+    "old": "\"https://gitea.com/gitea/act/archive/v0.261.6.tar.gz\""
+  },
+  {
+    "rule": "fetcher",
+    "field": "fetchTarball.sha256",
+    "old": "\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\""
+  }
+]

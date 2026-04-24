@@ -1,0 +1,17 @@
+---
+source: tests/snapshot/main.rs
+expression: output_for_insta
+input_file: tests/snapshot/data/fetchtarball/sourcehut_archive_version_update.nix
+---
+[
+  {
+    "rule": "fetcher",
+    "field": "fetchTarball.url",
+    "old": "\"https://git.sr.ht/~sircmpwn/scdoc/archive/1.9.3.tar.gz\""
+  },
+  {
+    "rule": "fetcher",
+    "field": "fetchTarball.sha256",
+    "old": "\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\""
+  }
+]
