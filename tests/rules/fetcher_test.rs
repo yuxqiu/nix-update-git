@@ -101,7 +101,7 @@ fn test_fetcher_builtins_fetch_git_follow_branch_updates_ref() {
 
     let nix_content = format!(
         r#"{{
-  src = builtins.fetchGit {{ # follow:master
+  src = builtins.fetchGit {{ # follow:branch master
     url = "{}";
     ref = "v1.0.0";
   }};
@@ -139,7 +139,7 @@ fn test_fetcher_fetchgit_follow_branch_updates_rev() {
 
     let nix_content = format!(
         r#"{{
-  src = fetchgit {{ # follow:master
+  src = fetchgit {{ # follow:branch master
     url = "{}";
     rev = "0000000000000000000000000000000000000000";
     hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
@@ -353,7 +353,7 @@ fn test_fetcher_follow_branch_comment() {
         r#"{{
   src = fetchgit {{
     url = "{}";
-    rev = "{}"; # follow:master
+    rev = "{}"; # follow:branch master
     hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   }};
 }}"#,
@@ -376,7 +376,7 @@ fn test_fetcher_follow_branch_comment() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("fetchgit.rev"),
-        "Expected to detect update for follow:master, got stdout: {}, stderr: {}",
+        "Expected to detect update for follow:branch master, got stdout: {}, stderr: {}",
         stdout,
         String::from_utf8_lossy(&output.stderr)
     );
@@ -576,7 +576,7 @@ fn test_fetcher_fetchpatch_follow_branch_updates_url() {
     // Since the GitHub repo doesn't exist, git ls-remote will fail, but
     // the tool should not crash.
     let nix_content = r#"{
-  patches = [ (fetchpatch { # follow:master
+  patches = [ (fetchpatch { # follow:branch master
     url = "https://github.com/owner/repo/commit/0000000000000000000000000000000000000000.patch";
     hash = "";
   }) ];
@@ -668,7 +668,7 @@ fn test_fetcher_fetchpatch_follow_branch_with_sha_url() {
     // GitHub repo in unit tests, we use a local TestRepo and verify that
     // the URL update logic is wired through correctly by checking that
     // the tool runs without error on a fetchpatch with follow comment.
-    let nix_content = r#"{  patches = [ (fetchpatch { # follow:main
+    let nix_content = r#"{  patches = [ (fetchpatch { # follow:branch main
     url = "https://github.com/owner/repo/commit/0000000000000000000000000000000000000000.patch";
     hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   }) ];

@@ -120,4 +120,13 @@ impl GitFetcher {
             .find(|r| r.kind == RefKind::Tag && r.name == tag);
         Ok(tag_ref.map(|r| r.sha.clone()))
     }
+
+    pub fn list_tags(url: &str) -> Result<Vec<(String, String)>> {
+        let refs = Self::list_refs(url, &[RefType::Tags])?;
+        Ok(refs
+            .into_iter()
+            .filter(|r| r.kind == RefKind::Tag)
+            .map(|r| (r.name, r.sha))
+            .collect())
+    }
 }

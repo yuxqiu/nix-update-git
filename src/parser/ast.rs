@@ -555,7 +555,7 @@ impl NixNode {
         }
     }
 
-    pub fn follow_branch_comment(&self) -> Option<String> {
+    pub fn follow_comment(&self) -> Option<String> {
         self.find_comment(|c| c.strip_prefix("follow:").map(|s| s.trim().to_string()))
     }
 

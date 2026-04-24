@@ -9,7 +9,7 @@ Update git references in Nix flake files and Nix expressions.
 - **Flake inputs**: update `ref` values and inline `?ref=` in URL strings
 - **Fetcher calls**: update `rev`, `tag`, and `ref` in `fetchgit`, `fetchFromGitHub`, `fetchFromGitLab`, `fetchFromGitea`, `fetchFromForgejo`, `fetchFromCodeberg`, `fetchFromSourcehut`, `fetchFromBitbucket`, `fetchFromRepoOrCz`, `fetchFromGitiles`, `fetchpatch`, and `builtins.fetchGit`
 - **mkDerivation**: update `version` and corresponding source ref (`tag`/`rev`/`ref`) and hash in `stdenv.mkDerivation rec { ... }` patterns
-- **Branch following**: use `# follow:<branch>` comments to track a branch's latest commit instead of version tags
+- **Branch following**: use `# follow:branch <name>` comments to track a branch's latest commit instead of version tags
 - **Pinning**: `# pin` comments on any input or fetcher call skips it entirely
 - **Multiple modes**: check (default), update, and interactive
 
@@ -190,14 +190,62 @@ When the `# pin` comment is present on the `mkDerivation` call, the entire block
 
 ### Branch following
 
-Use `# follow: <branch>` to track a branch's latest commit instead of version tags:
+Use `# follow:branch <name>` to track a branch's latest commit instead of version tags:
 
 ```nix
-src = fetchgit { # follow: master
+src = fetchgit { # follow:branch master
   url = "https://github.com/owner/repo";
   rev = "e67cc2e189679f991690ade03d0ee88566d2eb0f";
   hash = "sha256-...";
 };
+```
+
+The `# follow:` directive supports three modes:
+
+| Mode | Syntax | Behavior |
+| --- | --- | --- |
+| Branch | `# follow:branch <name>` | Tracks the latest commit on the given branch |
+| Regex | `# follow:regex <pattern>` | Finds the latest tag matching `^<pattern>$` (full match) and resolves it to a SHA |
+| Semver | `# follow:semver <requirement>` | Finds the latest tag whose version (after stripping prefix like `v`) satisfies the semver requirement, and resolves it to a SHA |
+
+Examples:
+
+```nix
+# Follow the main branch
+src = fetchgit { # follow:branch main
+  url = "https://github.com/owner/repo";
+  rev = "0000000000000000000000000000000000000000";
+  hash = "sha256-...";
+};
+
+# Follow tags matching a regex (full match)
+src = fetchgit { # follow:regex v[0-9]+\.[0-9]+\.[0-9]+
+  url = "https://github.com/owner/repo";
+  rev = "0000000000000000000000000000000000000000";
+  hash = "sha256-...";
+};
+
+# Follow tags within a semver range (prefix like 'v' is auto-stripped)
+src = fetchFromGitHub { # follow:semver ^0.1
+  owner = "owner";
+  repo = "repo";
+  rev = "v0.1.0";
+  hash = "sha256-...";
+};
+
+# Only allow updates within 0.x
+src = fetchFromGitHub { # follow:semver <1.0.0
+  owner = "owner";
+  repo = "repo";
+  rev = "v0.5.0";
+  hash = "sha256-...";
+};
+
+# fetchpatch also supports follow directives
+patches = [ (fetchpatch { # follow:branch main
+  url = "https://github.com/owner/repo/commit/abc123.patch";
+  hash = "";
+}) ];
 ```
 
 ### Pinned inputs

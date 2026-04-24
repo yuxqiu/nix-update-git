@@ -13,6 +13,123 @@ pub mod kind;
 pub mod patch_url;
 pub mod tarball;
 
+enum FollowSpec {
+    Branch(String),
+    Regex(regex::Regex),
+    Semver(semver::VersionReq),
+}
+
+fn parse_follow_spec(s: &str) -> Option<FollowSpec> {
+    let (kind, rest) = s.split_once(' ')?;
+    let rest = rest.trim();
+    match kind {
+        "branch" => {
+            if rest.is_empty() {
+                return None;
+            }
+            Some(FollowSpec::Branch(rest.to_string()))
+        }
+        "regex" => {
+            if rest.is_empty() {
+                return None;
+            }
+            regex::Regex::new(&format!("^(?:{})$", rest))
+                .ok()
+                .map(FollowSpec::Regex)
+        }
+        "semver" => {
+            if rest.is_empty() {
+                return None;
+            }
+            match semver::VersionReq::parse(rest) {
+                Ok(req) => Some(FollowSpec::Semver(req)),
+                Err(e) => {
+                    eprintln!("Warning: invalid semver requirement '{}': {:#}", rest, e);
+                    None
+                }
+            }
+        }
+        _ => None,
+    }
+}
+
+struct FollowResult {
+    sha: String,
+}
+
+fn resolve_follow(spec: &FollowSpec, git_url: &str) -> Result<Option<FollowResult>> {
+    match spec {
+        FollowSpec::Branch(branch) => {
+            let sha = match GitFetcher::get_latest_commit(git_url, branch)? {
+                Some(sha) => sha,
+                None => {
+                    eprintln!(
+                        "Warning: could not find branch '{}' for {}",
+                        branch, git_url
+                    );
+                    return Ok(None);
+                }
+            };
+            Ok(Some(FollowResult { sha }))
+        }
+        FollowSpec::Regex(pattern) => {
+            let tags = GitFetcher::list_tags(git_url)?;
+            let matched: Vec<_> = tags
+                .iter()
+                .filter(|(name, _)| pattern.is_match(name))
+                .collect();
+            if matched.is_empty() {
+                eprintln!(
+                    "Warning: no tags matching regex '{}' for {}",
+                    pattern, git_url
+                );
+                return Ok(None);
+            }
+            let best = matched
+                .into_iter()
+                .max_by(|(a, _), (b, _)| VersionDetector::compare(a, b));
+            match best {
+                Some((_, sha)) => Ok(Some(FollowResult { sha: sha.clone() })),
+                None => Ok(None),
+            }
+        }
+        FollowSpec::Semver(requirement) => {
+            let tags = GitFetcher::list_tags(git_url)?;
+            let matched: Vec<_> = tags
+                .iter()
+                .filter(|(name, _)| {
+                    let version_part = VersionDetector::prefix(name);
+                    let stripped = name.strip_prefix(version_part).unwrap_or(name);
+                    semver::Version::parse(stripped).is_ok_and(|v| requirement.matches(&v))
+                })
+                .collect();
+            if matched.is_empty() {
+                eprintln!(
+                    "Warning: no tags matching semver '{}' for {}",
+                    requirement, git_url
+                );
+                return Ok(None);
+            }
+            let best = matched.into_iter().max_by(|(a, _), (b, _)| {
+                let va =
+                    semver::Version::parse(a.strip_prefix(VersionDetector::prefix(a)).unwrap_or(a));
+                let vb =
+                    semver::Version::parse(b.strip_prefix(VersionDetector::prefix(b)).unwrap_or(b));
+                match (va, vb) {
+                    (Ok(va), Ok(vb)) => va.cmp(&vb),
+                    (Ok(_), Err(_)) => std::cmp::Ordering::Greater,
+                    (Err(_), Ok(_)) => std::cmp::Ordering::Less,
+                    (Err(_), Err(_)) => std::cmp::Ordering::Equal,
+                }
+            });
+            match best {
+                Some((_, sha)) => Ok(Some(FollowResult { sha: sha.clone() })),
+                None => Ok(None),
+            }
+        }
+    }
+}
+
 pub(crate) fn is_commit_hash(s: &str) -> bool {
     s.len() == 40 && s.chars().all(|c| c.is_ascii_hexdigit())
 }
@@ -147,7 +264,7 @@ struct FetcherCall {
     kind: FetcherKind,
     parsed: ParsedAttrs,
     pinned: bool,
-    follow_branch: Option<String>,
+    follow: Option<String>,
 }
 
 #[derive(Default)]
@@ -178,15 +295,13 @@ impl FetcherRule {
         }
 
         let pinned = arg.has_pin_comment() || node.has_pin_comment();
-        let follow_branch = arg
-            .follow_branch_comment()
-            .or_else(|| node.follow_branch_comment());
+        let follow = arg.follow_comment().or_else(|| node.follow_comment());
 
         Some(FetcherCall {
             kind,
             parsed: attrs.parsed,
             pinned,
-            follow_branch,
+            follow,
         })
     }
 
@@ -200,9 +315,13 @@ impl FetcherRule {
         let mut version_updated_rev: Option<String> = None;
 
         if !call.pinned {
-            if let Some(branch) = &call.follow_branch {
-                version_updated_rev =
-                    self.handle_branch_following(call, &git_url, branch, &mut updates)?;
+            if let Some(follow_str) = &call.follow {
+                if let Some(spec) = parse_follow_spec(follow_str) {
+                    version_updated_rev =
+                        self.handle_following(call, &git_url, &spec, &mut updates)?;
+                } else {
+                    eprintln!("Warning: invalid follow directive: '{}'", follow_str);
+                }
             } else {
                 version_updated_rev = self.handle_version_update(call, &git_url, &mut updates)?;
             }
@@ -238,30 +357,26 @@ impl FetcherRule {
 
         let parsed_url = patch_url::parse_patch_url(&url);
 
-        if let Some(branch) = &call.follow_branch {
-            if let Some(parsed) = &parsed_url {
-                let git_url = parsed.git_remote_url();
-                match GitFetcher::get_latest_commit(&git_url, branch) {
-                    Ok(Some(new_sha)) => {
-                        let current_ref = parsed.current_ref();
-                        if current_ref != new_sha {
-                            current_url = parsed.replace_ref(&new_sha);
-                            url_changed = true;
+        if let Some(follow_str) = &call.follow {
+            if let Some(spec) = parse_follow_spec(follow_str) {
+                if let Some(parsed) = &parsed_url {
+                    let git_url = parsed.git_remote_url();
+                    match resolve_follow(&spec, &git_url) {
+                        Ok(Some(result)) => {
+                            let current_ref = parsed.current_ref();
+                            if current_ref != result.sha {
+                                current_url = parsed.replace_ref(&result.sha);
+                                url_changed = true;
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(e) => {
+                            eprintln!("Warning: could not resolve follow for {}: {:#}", git_url, e);
                         }
                     }
-                    Ok(None) => {
-                        eprintln!(
-                            "Warning: could not find branch '{}' for {}",
-                            branch, git_url
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "Warning: could not fetch latest commit for {}: {:#}",
-                            git_url, e
-                        );
-                    }
                 }
+            } else {
+                eprintln!("Warning: invalid follow directive: '{}'", follow_str);
             }
         } else if !call.pinned
             && let Some(parsed) = &parsed_url
@@ -435,23 +550,19 @@ impl FetcherRule {
         }
     }
 
-    fn handle_branch_following(
+    fn handle_following(
         &self,
         call: &FetcherCall,
         git_url: &str,
-        branch: &str,
+        spec: &FollowSpec,
         updates: &mut Vec<Update>,
     ) -> Result<Option<String>> {
-        let new_sha = match GitFetcher::get_latest_commit(git_url, branch)? {
-            Some(sha) => sha,
-            None => {
-                eprintln!(
-                    "Warning: could not find branch '{}' for {}",
-                    branch, git_url
-                );
-                return Ok(None);
-            }
+        let result = match resolve_follow(spec, git_url)? {
+            Some(r) => r,
+            None => return Ok(None),
         };
+
+        let new_sha = result.sha;
 
         let current_ref = call
             .parsed
@@ -1249,5 +1360,82 @@ stdenv.mkDerivation (finalAttrs: {
         assert!(attrs.interpolated.contains_key("rev"));
         assert!(attrs.interpolated.contains_key("owner"));
         assert!(attrs.interpolated_unresolved.is_empty());
+    }
+
+    #[test]
+    fn test_parse_follow_spec_branch() {
+        let spec = super::parse_follow_spec("branch main");
+        assert!(matches!(spec, Some(super::FollowSpec::Branch(_))));
+        if let Some(super::FollowSpec::Branch(name)) = spec {
+            assert_eq!(name, "main");
+        }
+    }
+
+    #[test]
+    fn test_parse_follow_spec_regex() {
+        let spec = super::parse_follow_spec("regex v[0-9]+\\.[0-9]+");
+        assert!(matches!(spec, Some(super::FollowSpec::Regex(_))));
+        if let Some(super::FollowSpec::Regex(re)) = spec {
+            assert!(re.is_match("v1.0"));
+            assert!(re.is_match("v2.41"));
+            assert!(!re.is_match("2.41"));
+        }
+    }
+
+    #[test]
+    fn test_parse_follow_spec_regex_full_match() {
+        let spec = super::parse_follow_spec("regex v[0-9]+\\.[0-9]+");
+        if let Some(super::FollowSpec::Regex(re)) = spec {
+            assert!(re.is_match("v1.0"));
+            assert!(!re.is_match("v1.0.0"));
+            assert!(!re.is_match("2.41"));
+        }
+    }
+
+    #[test]
+    fn test_parse_follow_spec_semver() {
+        let spec = super::parse_follow_spec("semver 0.1");
+        if let Some(super::FollowSpec::Semver(req)) = spec {
+            assert!(req.matches(&semver::Version::parse("0.1.5").unwrap()));
+            assert!(!req.matches(&semver::Version::parse("1.0.0").unwrap()));
+        } else {
+            panic!("expected Semver variant");
+        }
+    }
+
+    #[test]
+    fn test_parse_follow_spec_semver_gt() {
+        let spec = super::parse_follow_spec("semver >0.1.0");
+        if let Some(super::FollowSpec::Semver(req)) = spec {
+            assert!(req.matches(&semver::Version::parse("0.2.0").unwrap()));
+            assert!(!req.matches(&semver::Version::parse("0.1.0").unwrap()));
+        } else {
+            panic!("expected Semver variant");
+        }
+    }
+
+    #[test]
+    fn test_parse_follow_spec_semver_caret() {
+        let spec = super::parse_follow_spec("semver ^0.1");
+        if let Some(super::FollowSpec::Semver(req)) = spec {
+            assert!(req.matches(&semver::Version::parse("0.1.5").unwrap()));
+            assert!(!req.matches(&semver::Version::parse("1.0.0").unwrap()));
+        } else {
+            panic!("expected Semver variant");
+        }
+    }
+
+    #[test]
+    fn test_parse_follow_spec_invalid() {
+        assert!(super::parse_follow_spec("unknown foo").is_none());
+        assert!(super::parse_follow_spec("branch").is_none());
+        assert!(super::parse_follow_spec("regex").is_none());
+        assert!(super::parse_follow_spec("semver").is_none());
+        assert!(super::parse_follow_spec("nonsense").is_none());
+    }
+
+    #[test]
+    fn test_parse_follow_spec_invalid_regex() {
+        assert!(super::parse_follow_spec("regex [invalid").is_none());
     }
 }

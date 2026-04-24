@@ -190,7 +190,7 @@ fn test_has_pin_comment_absent() {
 }
 
 #[test]
-fn test_follow_branch_comment_absent() {
+fn test_follow_comment_absent() {
     let content = "{ src = fetchgit { url = \"https://example.com/repo\"; rev = \"abc123\"; }; }";
     let root = parse(content);
     let attr_set = find_attr_set(&root).unwrap();
@@ -198,26 +198,26 @@ fn test_follow_branch_comment_absent() {
         if node.kind() == rnix::SyntaxKind::NODE_APPLY {
             let name = node.apply_function_name();
             if name.as_deref() == Some("fetchgit") {
-                assert_eq!(node.follow_branch_comment(), None);
+                assert_eq!(node.follow_comment(), None);
             }
         }
     }
 }
 
 #[test]
-fn test_follow_branch_comment_present() {
-    let content = "{ src = fetchgit { # follow:main\n    url = \"https://example.com/repo\"; rev = \"abc123\"; }; }";
+fn test_follow_comment_present() {
+    let content = "{ src = fetchgit { # follow:branch main\n    url = \"https://example.com/repo\"; rev = \"abc123\"; }; }";
     let root = parse(content);
     let attr_set = find_attr_set(&root).unwrap();
     for node in attr_set.traverse() {
         if node.kind() == rnix::SyntaxKind::NODE_ATTR_SET
-            && let Some(branch) = node.follow_branch_comment()
+            && let Some(follow) = node.follow_comment()
         {
-            assert_eq!(branch, "main".to_string());
+            assert_eq!(follow, "branch main".to_string());
             return;
         }
     }
-    panic!("Expected to find follow:main comment on attr set node");
+    panic!("Expected to find follow:branch main comment on attr set node");
 }
 
 #[test]

@@ -98,7 +98,7 @@ impl VersionDetector {
         }
     }
 
-    fn prefix(s: &str) -> &str {
+    pub fn prefix(s: &str) -> &str {
         let end = s.find(|c: char| c.is_ascii_digit()).unwrap_or(s.len());
         &s[..end]
     }

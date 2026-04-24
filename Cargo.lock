@@ -769,6 +769,7 @@ dependencies = [
  "regex",
  "rnix",
  "rowan 0.15.18",
+ "semver",
  "serde",
  "serde_json",
  "tar",
