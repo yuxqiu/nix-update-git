@@ -1,11 +1,12 @@
 ---
 source: tests/snapshot/main.rs
 expression: output_for_insta
-input_file: tests/snapshot/data/fetchpatch_parity/pinned_gitlab_commit_hash.nix
+input_file: tests/snapshot/data/fetchpatch/pinned_gitlab_commit_hash.nix
 ---
 [
   {
     "rule": "fetcher",
+    "target": "gitlab.com/procps-ng/procps",
     "field": "fetchpatch.hash",
     "old": "\"\"",
     "new": "\"sha256-PC8yHwlRETyc32TfRx2b05tqnKW8D4ehMrVjWmbHYz0=\"",

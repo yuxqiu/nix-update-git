@@ -6,11 +6,13 @@ input_file: tests/snapshot/data/fetchtarball/gitea_archive_version_update.nix
 [
   {
     "rule": "fetcher",
+    "target": "gitea.com/gitea/act",
     "field": "fetchTarball.url",
     "old": "\"https://gitea.com/gitea/act/archive/v0.261.6.tar.gz\""
   },
   {
     "rule": "fetcher",
+    "target": "gitea.com/gitea/act",
     "field": "fetchTarball.sha256",
     "old": "\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\""
   }

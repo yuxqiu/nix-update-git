@@ -6,6 +6,7 @@ input_file: tests/snapshot/data/update-nix-fetchgit/upstream_version_shared_with
 [
   {
     "rule": "mk-derivation",
+    "target": "expipiplus1/update-nix-fetchgit",
     "field": "mkDerivation.version",
     "old": "\"v0.2.1\"",
     "range": [
@@ -15,6 +16,7 @@ input_file: tests/snapshot/data/update-nix-fetchgit/upstream_version_shared_with
   },
   {
     "rule": "mk-derivation",
+    "target": "expipiplus1/update-nix-fetchgit",
     "field": "fetchFromGitHub.rev",
     "old": "\"v0.2.1\"",
     "range": [
@@ -24,6 +26,7 @@ input_file: tests/snapshot/data/update-nix-fetchgit/upstream_version_shared_with
   },
   {
     "rule": "mk-derivation",
+    "target": "expipiplus1/update-nix-fetchgit",
     "field": "fetchFromGitHub.hash",
     "old": "\"\"",
     "range": [

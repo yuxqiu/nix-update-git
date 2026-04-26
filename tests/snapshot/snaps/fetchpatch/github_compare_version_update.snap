@@ -6,11 +6,13 @@ input_file: tests/snapshot/data/fetchpatch/github_compare_version_update.nix
 [
   {
     "rule": "fetcher",
+    "target": "github.com/yuxqiu/nix-update-git",
     "field": "fetchpatch.url",
     "old": "\"https://github.com/yuxqiu/nix-update-git/compare/v0.1.0...v0.2.0.patch\""
   },
   {
     "rule": "fetcher",
+    "target": "github.com/yuxqiu/nix-update-git",
     "field": "fetchpatch.hash",
     "old": "\"\""
   }

@@ -6,11 +6,13 @@ input_file: tests/snapshot/data/fetchpatch/gitlab_follow_branch.nix
 [
   {
     "rule": "fetcher",
+    "target": "gitlab.com/procps-ng/procps",
     "field": "fetchpatch.url",
     "old": "\"https://gitlab.com/procps-ng/procps/-/commit/0000000000000000000000000000000000000000.patch\""
   },
   {
     "rule": "fetcher",
+    "target": "gitlab.com/procps-ng/procps",
     "field": "fetchpatch.hash",
     "old": "\"\""
   }

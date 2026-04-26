@@ -6,6 +6,7 @@ input_file: tests/snapshot/data/fetcher/gitlab_procps_hash.nix
 [
   {
     "rule": "fetcher",
+    "target": "procps-ng/procps@gitlab.com",
     "field": "fetchFromGitLab.hash",
     "old": "\"\"",
     "new": "\"sha256-GVWLPd9wr3e94kEEJKmOk2ghXAFIB+BiSrK6Qzyr+uk=\"",

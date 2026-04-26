@@ -6,6 +6,7 @@ input_file: tests/snapshot/data/fetchgit_parity/pinned_root_dir.nix
 [
   {
     "rule": "fetcher",
+    "target": "https://github.com/expipiplus1/update-nix-fetchgit",
     "field": "fetchgit.hash",
     "old": "\"\"",
     "new": "\"sha256-gH5M/jW6F+mwCo3+e2VhdDu0o1GvGFLHOBWcB+b1aPY=\"",

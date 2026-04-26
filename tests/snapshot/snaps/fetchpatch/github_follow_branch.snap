@@ -6,11 +6,13 @@ input_file: tests/snapshot/data/fetchpatch/github_follow_branch.nix
 [
   {
     "rule": "fetcher",
+    "target": "github.com/yuxqiu/nix-update-git",
     "field": "fetchpatch.url",
     "old": "\"https://github.com/yuxqiu/nix-update-git/commit/4b60d1ab5349af3a6f9d1b0797aa520b041e7eb3.patch\""
   },
   {
     "rule": "fetcher",
+    "target": "github.com/yuxqiu/nix-update-git",
     "field": "fetchpatch.hash",
     "old": "\"\""
   }

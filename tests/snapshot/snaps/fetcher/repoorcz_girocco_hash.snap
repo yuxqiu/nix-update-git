@@ -6,6 +6,7 @@ input_file: tests/snapshot/data/fetcher/repoorcz_girocco_hash.nix
 [
   {
     "rule": "fetcher",
+    "target": "girocco",
     "field": "fetchFromRepoOrCz.hash",
     "old": "\"\"",
     "new": "\"sha256-dgqYA5zEU6+OPqi1SK4Q0erwkChxpatLtJyzAx67wUc=\"",

@@ -6,6 +6,7 @@ input_file: tests/snapshot/data/fetcher/yuxqiu_nix_update_git_fetch_from_github_
 [
   {
     "rule": "fetcher",
+    "target": "yuxqiu/nix-update-git",
     "field": "fetchFromGitHub.hash",
     "old": "\"\"",
     "new": "\"sha256-XoU5agDsmgsUx4Nw5fRJHgz4zsMRwKy9C/MJvKyg2gg=\"",

@@ -6,11 +6,13 @@ input_file: tests/snapshot/data/fetchpatch/gitlab_compare_version_update.nix
 [
   {
     "rule": "fetcher",
+    "target": "gitlab.com/procps-ng/procps",
     "field": "fetchpatch.url",
     "old": "\"https://gitlab.com/procps-ng/procps/-/compare/v4.0.2...v4.0.3.patch\""
   },
   {
     "rule": "fetcher",
+    "target": "gitlab.com/procps-ng/procps",
     "field": "fetchpatch.hash",
     "old": "\"\""
   }

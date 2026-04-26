@@ -6,6 +6,7 @@ input_file: tests/snapshot/data/update-nix-fetchgit/upstream_scoped_fetchgit.nix
 [
   {
     "rule": "fetcher",
+    "target": "https://github.com/expipiplus1/update-nix-fetchgit",
     "field": "fetchgit.rev",
     "old": "\"v0.2.1\"",
     "range": [
@@ -15,6 +16,7 @@ input_file: tests/snapshot/data/update-nix-fetchgit/upstream_scoped_fetchgit.nix
   },
   {
     "rule": "fetcher",
+    "target": "https://github.com/expipiplus1/update-nix-fetchgit",
     "field": "fetchgit.hash",
     "old": "\"\"",
     "range": [

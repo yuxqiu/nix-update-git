@@ -6,11 +6,13 @@ input_file: tests/snapshot/data/fetchpatch/codeberg_follow_branch.nix
 [
   {
     "rule": "fetcher",
+    "target": "codeberg.org/ddevault/scdoc",
     "field": "fetchpatch.url",
     "old": "\"https://codeberg.org/ddevault/scdoc/commit/0000000000000000000000000000000000000000.patch\""
   },
   {
     "rule": "fetcher",
+    "target": "codeberg.org/ddevault/scdoc",
     "field": "fetchpatch.hash",
     "old": "\"\""
   }

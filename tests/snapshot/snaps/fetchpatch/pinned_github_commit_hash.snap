@@ -1,11 +1,12 @@
 ---
 source: tests/snapshot/main.rs
 expression: output_for_insta
-input_file: tests/snapshot/data/fetchpatch_parity/pinned_github_commit_hash.nix
+input_file: tests/snapshot/data/fetchpatch/pinned_github_commit_hash.nix
 ---
 [
   {
     "rule": "fetcher",
+    "target": "github.com/yuxqiu/nix-update-git",
     "field": "fetchpatch.hash",
     "old": "\"\"",
     "new": "\"sha256-E/CKiuHfYa0G7DThRxennyLjQ6Dz1f85jaGx5gpNQ78=\"",

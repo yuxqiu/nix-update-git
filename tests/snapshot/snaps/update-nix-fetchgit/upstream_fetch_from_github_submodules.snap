@@ -6,6 +6,7 @@ input_file: tests/snapshot/data/update-nix-fetchgit/upstream_fetch_from_github_s
 [
   {
     "rule": "fetcher",
+    "target": "expipiplus1/has-submodule",
     "field": "fetchFromGitHub.hash",
     "old": "\"\"",
     "new": "\"sha256-byTyWAUSQmXSqoS6DLkdtfJyoxsrd1K55a5LiwAwaPA=\"",

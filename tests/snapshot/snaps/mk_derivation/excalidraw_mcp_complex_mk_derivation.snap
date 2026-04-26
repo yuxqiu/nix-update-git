@@ -6,6 +6,7 @@ input_file: tests/snapshot/data/mk_derivation/excalidraw_mcp_complex_mk_derivati
 [
   {
     "rule": "mk-derivation",
+    "target": "excalidraw/excalidraw-mcp",
     "field": "fetchFromGitHub.rev",
     "old": "\"\"",
     "range": [
@@ -15,6 +16,7 @@ input_file: tests/snapshot/data/mk_derivation/excalidraw_mcp_complex_mk_derivati
   },
   {
     "rule": "mk-derivation",
+    "target": "excalidraw/excalidraw-mcp",
     "field": "fetchFromGitHub.hash",
     "old": "\"\"",
     "range": [

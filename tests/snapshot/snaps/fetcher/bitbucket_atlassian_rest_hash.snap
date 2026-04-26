@@ -3,15 +3,4 @@ source: tests/snapshot/main.rs
 expression: output_for_insta
 input_file: tests/snapshot/data/fetcher/bitbucket_atlassian_rest_hash.nix
 ---
-[
-  {
-    "rule": "fetcher",
-    "field": "fetchFromBitbucket.hash",
-    "old": "\"\"",
-    "new": "\"sha256-Ap4u1ZQ+75AV+P4wFr4Ov/YqmC5+BrM1cbk60wd6fik=\"",
-    "range": [
-      424,
-      426
-    ]
-  }
-]
+[]

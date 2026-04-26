@@ -6,6 +6,7 @@ input_file: tests/snapshot/data/fetchtarball/pinned_bitbucket_archive_empty_hash
 [
   {
     "rule": "fetcher",
+    "target": "bitbucket.org/atlassian/atlassian-rest",
     "field": "fetchTarball.sha256",
     "old": "\"\"",
     "new": "\"0abyg83x6fmrf4sv61ky5sc2mxmz1sz1cc7yz0ar1vryjkajx7h2\"",

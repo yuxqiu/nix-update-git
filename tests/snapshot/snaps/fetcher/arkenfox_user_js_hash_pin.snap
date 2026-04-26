@@ -6,6 +6,7 @@ input_file: tests/snapshot/data/fetcher/arkenfox_user_js_hash_pin.nix
 [
   {
     "rule": "fetcher",
+    "target": "arkenfox/user.js",
     "field": "fetchFromGitHub.hash",
     "old": "\"\"",
     "new": "\"sha256-+DN5bKev9IyefMikOqEWZf/u0flJbLAxwEotGhKSSS4=\"",

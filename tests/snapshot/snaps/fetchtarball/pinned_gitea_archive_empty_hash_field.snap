@@ -6,6 +6,7 @@ input_file: tests/snapshot/data/fetchtarball/pinned_gitea_archive_empty_hash_fie
 [
   {
     "rule": "fetcher",
+    "target": "gitea.com/gitea/act",
     "field": "fetchTarball.hash",
     "old": "\"\"",
     "new": "\"sha256-wnERl1BSVqjpIdFR7J0zpmC16SH+RcR6lb4YexltM7M=\"",

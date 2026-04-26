@@ -6,6 +6,7 @@ input_file: tests/snapshot/data/fetchpatch/pinned_github_patch.nix
 [
   {
     "rule": "fetcher",
+    "target": "github.com/yuxqiu/nix-update-git",
     "field": "fetchpatch.hash",
     "old": "\"\"",
     "new": "\"sha256-E/CKiuHfYa0G7DThRxennyLjQ6Dz1f85jaGx5gpNQ78=\"",

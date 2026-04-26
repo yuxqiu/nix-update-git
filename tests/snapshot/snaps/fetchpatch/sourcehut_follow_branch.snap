@@ -6,11 +6,13 @@ input_file: tests/snapshot/data/fetchpatch/sourcehut_follow_branch.nix
 [
   {
     "rule": "fetcher",
+    "target": "git.sr.ht/~sircmpwn/scdoc",
     "field": "fetchpatch.url",
     "old": "\"https://git.sr.ht/~sircmpwn/scdoc/commit/0000000000000000000000000000000000000000.patch\""
   },
   {
     "rule": "fetcher",
+    "target": "git.sr.ht/~sircmpwn/scdoc",
     "field": "fetchpatch.hash",
     "old": "\"\""
   }

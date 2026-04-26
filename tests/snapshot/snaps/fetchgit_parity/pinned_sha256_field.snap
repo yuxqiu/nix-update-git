@@ -6,6 +6,7 @@ input_file: tests/snapshot/data/fetchgit_parity/pinned_sha256_field.nix
 [
   {
     "rule": "fetcher",
+    "target": "https://github.com/expipiplus1/update-nix-fetchgit",
     "field": "fetchgit.sha256",
     "old": "\"\"",
     "new": "\"1js9f1cgknz8486z5zzwpk2jhz91zswg4kw8la23vzbjggfilf0c\"",

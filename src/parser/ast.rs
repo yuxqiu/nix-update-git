@@ -187,8 +187,7 @@ impl NixNode {
     // -- Public API -------------------------------------------------------
 
     pub fn has_pin_comment(&self) -> bool {
-        self.find_comment(|c| c.starts_with("pin").then_some(()))
-            .is_some()
+        self.find_comment(|c| (c == "pin").then_some(())).is_some()
     }
 
     pub fn attrpath_segments(&self) -> Vec<String> {

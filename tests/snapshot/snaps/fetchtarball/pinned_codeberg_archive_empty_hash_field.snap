@@ -6,6 +6,7 @@ input_file: tests/snapshot/data/fetchtarball/pinned_codeberg_archive_empty_hash_
 [
   {
     "rule": "fetcher",
+    "target": "codeberg.org/ddevault/scdoc",
     "field": "fetchTarball.hash",
     "old": "\"\"",
     "new": "\"sha256-2NVC+1in1Yt6/XGcHXP+V4AAz8xW/hSq9ctF/Frdgh0=\"",

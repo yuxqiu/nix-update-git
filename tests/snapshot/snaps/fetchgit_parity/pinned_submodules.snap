@@ -6,6 +6,7 @@ input_file: tests/snapshot/data/fetchgit_parity/pinned_submodules.nix
 [
   {
     "rule": "fetcher",
+    "target": "https://github.com/expipiplus1/has-submodule",
     "field": "fetchgit.hash",
     "old": "\"\"",
     "new": "\"sha256-byTyWAUSQmXSqoS6DLkdtfJyoxsrd1K55a5LiwAwaPA=\"",

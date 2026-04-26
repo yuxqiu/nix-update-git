@@ -6,6 +6,7 @@ input_file: tests/snapshot/data/fetchgit_parity/pinned_sparse_checkout.nix
 [
   {
     "rule": "fetcher",
+    "target": "https://github.com/expipiplus1/update-nix-fetchgit",
     "field": "fetchgit.hash",
     "old": "\"\"",
     "new": "\"sha256-K/i2cdJLnwdVhXsoP04Y0CqGCYmBCN7f4zYPLfTwP4A=\"",

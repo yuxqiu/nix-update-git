@@ -907,7 +907,7 @@ impl UpdateRule for FetcherRule {
             None => return Ok(None),
         };
 
-        let detail = call.kind.display_detail(&call.parsed);
+        let target = call.kind.display_target(&call.parsed);
 
         let mut updates = match call.kind {
             FetcherKind::FetchPatch => Self::check_fetchpatch_call(&call)?,
@@ -927,7 +927,7 @@ impl UpdateRule for FetcherRule {
 
         if let Some(updates) = &mut updates {
             for update in updates.iter_mut() {
-                update.detail = detail.clone();
+                update.target = target.clone();
             }
         }
 

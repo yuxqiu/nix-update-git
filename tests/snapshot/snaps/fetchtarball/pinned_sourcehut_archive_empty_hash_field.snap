@@ -6,6 +6,7 @@ input_file: tests/snapshot/data/fetchtarball/pinned_sourcehut_archive_empty_hash
 [
   {
     "rule": "fetcher",
+    "target": "git.sr.ht/~sircmpwn/scdoc",
     "field": "fetchTarball.hash",
     "old": "\"\"",
     "new": "\"sha256-1BR66/o0FOALXFVCRr69yUYmY5XygPA9FpMR4xTlLgs=\"",

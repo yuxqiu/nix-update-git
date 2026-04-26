@@ -1,4 +1,5 @@
 use crate::parser::{AttrSpec, AttrType, ParsedAttrs};
+use crate::rules::fetcher::source_url::parse_source_url;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FetcherKind {
@@ -226,7 +227,7 @@ impl FetcherKind {
         self.attr_spec().iter().map(|s| s.key).collect()
     }
 
-    pub fn display_detail(&self, parsed: &ParsedAttrs) -> Option<String> {
+    pub fn display_target(&self, parsed: &ParsedAttrs) -> Option<String> {
         match self {
             Self::FetchFromGitHub => {
                 let owner = parsed.strings.get("owner")?;
@@ -264,12 +265,15 @@ impl FetcherKind {
                 let repo = parsed.strings.get("repo")?;
                 Some(format!("{}/{}", owner, repo))
             }
-            Self::FetchFromGitiles => parsed.strings.get("url").cloned(),
             Self::FetchFromRepoOrCz => parsed.strings.get("repo").cloned(),
-            Self::FetchGit | Self::FetchPatch | Self::FetchTarball => {
+            Self::FetchPatch | Self::FetchTarball => parsed.strings.get("url").and_then(|url| {
+                let parsed = parse_source_url(url)?;
+                Some(format!("{}/{}", parsed.domain, parsed.project))
+            }),
+            // these categories report unstructured url
+            Self::FetchFromGitiles | Self::FetchGit | Self::BuiltinsFetchGit => {
                 parsed.strings.get("url").cloned()
             }
-            Self::BuiltinsFetchGit => parsed.strings.get("url").cloned(),
         }
     }
 }

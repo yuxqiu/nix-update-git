@@ -6,6 +6,7 @@ input_file: tests/snapshot/data/fetcher/gitea_act_hash.nix
 [
   {
     "rule": "fetcher",
+    "target": "gitea/act@gitea.com",
     "field": "fetchFromGitea.hash",
     "old": "\"\"",
     "new": "\"sha256-wnERl1BSVqjpIdFR7J0zpmC16SH+RcR6lb4YexltM7M=\"",

@@ -41,7 +41,7 @@ impl FlakeUrl {
         }
     }
 
-    fn display_short(&self) -> String {
+    fn display_target(&self) -> String {
         match self {
             FlakeUrl::GitHub { owner, repo } => format!("{}/{}", owner, repo),
             FlakeUrl::GitLab { owner, repo } => format!("{}/{}", owner, repo),
@@ -55,6 +55,7 @@ impl FlakeUrl {
 struct ParsedFlakeUrl {
     flake_url: FlakeUrl,
     inline_ref: Option<String>,
+    extra_params: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -80,7 +81,8 @@ impl FlakeInputRule {
         let url = url.trim();
 
         if let Some(rest) = url.strip_prefix("github:") {
-            let (rest_without_ref, inline_ref) = Self::extract_ref_from_url(rest, true);
+            let (rest_without_ref, inline_ref, extra_params) =
+                Self::extract_ref_from_url(rest, true);
             let (owner, repo) = rest_without_ref.split_once('/')?;
             Some(ParsedFlakeUrl {
                 flake_url: FlakeUrl::GitHub {
@@ -88,9 +90,11 @@ impl FlakeInputRule {
                     repo: repo.to_string(),
                 },
                 inline_ref,
+                extra_params,
             })
         } else if let Some(rest) = url.strip_prefix("gitlab:") {
-            let (rest_without_ref, inline_ref) = Self::extract_ref_from_url(rest, true);
+            let (rest_without_ref, inline_ref, extra_params) =
+                Self::extract_ref_from_url(rest, true);
             let (owner, repo) = rest_without_ref.split_once('/')?;
             Some(ParsedFlakeUrl {
                 flake_url: FlakeUrl::GitLab {
@@ -98,9 +102,11 @@ impl FlakeInputRule {
                     repo: repo.to_string(),
                 },
                 inline_ref,
+                extra_params,
             })
         } else if let Some(rest) = url.strip_prefix("sourcehut:") {
-            let (rest_without_ref, inline_ref) = Self::extract_ref_from_url(rest, true);
+            let (rest_without_ref, inline_ref, extra_params) =
+                Self::extract_ref_from_url(rest, true);
             let (owner, repo) = rest_without_ref.split_once('/')?;
             Some(ParsedFlakeUrl {
                 flake_url: FlakeUrl::SourceHut {
@@ -108,98 +114,120 @@ impl FlakeInputRule {
                     repo: repo.to_string(),
                 },
                 inline_ref,
+                extra_params,
             })
         } else if let Some(rest) = url.strip_prefix("git+https://") {
-            let (clean_url, inline_ref) = Self::extract_ref_from_url(rest, false);
+            let (clean_url, inline_ref, extra_params) = Self::extract_ref_from_url(rest, false);
             Some(ParsedFlakeUrl {
                 flake_url: FlakeUrl::GitRemote {
                     url: format!("https://{}", clean_url),
                 },
                 inline_ref,
+                extra_params,
             })
         } else if let Some(rest) = url.strip_prefix("git+ssh://") {
-            let (clean_url, inline_ref) = Self::extract_ref_from_url(rest, false);
+            let (clean_url, inline_ref, extra_params) = Self::extract_ref_from_url(rest, false);
             Some(ParsedFlakeUrl {
                 flake_url: FlakeUrl::GitRemote {
                     url: format!("ssh://{}", clean_url),
                 },
                 inline_ref,
+                extra_params,
             })
         } else if let Some(rest) = url.strip_prefix("git+file://") {
-            let (clean_path, inline_ref) = Self::extract_ref_from_url(rest, false);
+            let (clean_path, inline_ref, extra_params) = Self::extract_ref_from_url(rest, false);
             Some(ParsedFlakeUrl {
                 flake_url: FlakeUrl::GitLocal { path: clean_path },
                 inline_ref,
+                extra_params,
             })
         } else if url.starts_with("git+http://") {
             let rest = url.strip_prefix("git+http://")?;
-            let (clean_url, inline_ref) = Self::extract_ref_from_url(rest, false);
+            let (clean_url, inline_ref, extra_params) = Self::extract_ref_from_url(rest, false);
             Some(ParsedFlakeUrl {
                 flake_url: FlakeUrl::GitRemote {
                     url: format!("http://{}", clean_url),
                 },
                 inline_ref,
+                extra_params,
             })
         } else {
             None
         }
     }
 
-    fn extract_ref_from_url(rest: &str, trim_trailing_slash: bool) -> (String, Option<String>) {
+    fn extract_ref_from_url(
+        rest: &str,
+        trim_trailing_slash: bool,
+    ) -> (String, Option<String>, Vec<String>) {
         if let Some(qpos) = rest.find('?') {
             let mut base = &rest[..qpos];
             if trim_trailing_slash {
                 base = base.trim_end_matches('/');
             }
             let query = &rest[qpos + 1..];
-            let inline_ref = query
-                .split('&')
-                .find_map(|param| param.strip_prefix("ref="));
-            (base.to_string(), inline_ref.map(String::from))
+            let mut inline_ref = None;
+            let mut extra_params = Vec::new();
+            for param in query.split('&') {
+                if let Some(ref_val) = param.strip_prefix("ref=") {
+                    inline_ref = Some(ref_val.to_string());
+                } else {
+                    extra_params.push(param.to_string());
+                }
+            }
+            (base.to_string(), inline_ref, extra_params)
         } else {
-            (rest.to_string(), None)
+            (rest.to_string(), None, Vec::new())
         }
     }
 
     fn reconstruct_url(original_url: &str, new_ref: &str) -> Option<String> {
         let url = original_url.trim();
         let parsed = Self::parse_flake_url(url)?;
+        let extra = &parsed.extra_params;
+        let query = Self::build_query(new_ref, extra);
 
         match &parsed.flake_url {
             FlakeUrl::GitHub { owner, repo } => {
-                Some(format!("github:{}/{}?ref={}", owner, repo, new_ref))
+                Some(format!("github:{}/{}?{}", owner, repo, query))
             }
             FlakeUrl::GitLab { owner, repo } => {
-                Some(format!("gitlab:{}/{}?ref={}", owner, repo, new_ref))
+                Some(format!("gitlab:{}/{}?{}", owner, repo, query))
             }
             FlakeUrl::SourceHut { owner, repo } => {
-                Some(format!("sourcehut:{}/{}?ref={}", owner, repo, new_ref))
+                Some(format!("sourcehut:{}/{}?{}", owner, repo, query))
             }
             FlakeUrl::GitRemote { url: remote_url } => {
                 if url.starts_with("git+https://") {
                     Some(format!(
-                        "git+https://{}?ref={}",
+                        "git+https://{}?{}",
                         remote_url.trim_start_matches("https://"),
-                        new_ref
+                        query
                     ))
                 } else if url.starts_with("git+ssh://") {
                     Some(format!(
-                        "git+ssh://{}?ref={}",
+                        "git+ssh://{}?{}",
                         remote_url.trim_start_matches("ssh://"),
-                        new_ref
+                        query
                     ))
                 } else if url.starts_with("git+http://") {
                     Some(format!(
-                        "git+http://{}?ref={}",
+                        "git+http://{}?{}",
                         remote_url.trim_start_matches("http://"),
-                        new_ref
+                        query
                     ))
                 } else {
                     None
                 }
             }
-            FlakeUrl::GitLocal { path } => Some(format!("git+file://{}?ref={}", path, new_ref)),
+            FlakeUrl::GitLocal { path } => Some(format!("git+file://{}?{}", path, query)),
         }
+    }
+
+    fn build_query(ref_val: &str, extra_params: &[String]) -> String {
+        let mut parts = vec![format!("ref={}", ref_val)];
+        parts.extend(extra_params.iter().cloned());
+        parts.join("&")
     }
 
     fn collect_inputs_from_root(root: &NixNode) -> Vec<InputDef> {
@@ -481,7 +509,7 @@ impl UpdateRule for FlakeInputRule {
                 None => continue,
             };
 
-            let detail = parsed.flake_url.display_short();
+            let target = parsed.flake_url.display_target();
 
             if let Ok(Some(latest_tag)) =
                 GitFetcher::get_latest_tag_matching(&remote_url, Some(&ref_sv.value))
@@ -495,7 +523,7 @@ impl UpdateRule for FlakeInputRule {
                                 format!("\"{}\"", new_url),
                                 url_sv.range,
                             )
-                            .with_detail(detail),
+                            .with_target(target),
                         );
                     }
                 } else {
@@ -505,7 +533,7 @@ impl UpdateRule for FlakeInputRule {
                             format!("\"{}\"", latest_tag),
                             ref_sv.range,
                         )
-                        .with_detail(detail),
+                        .with_target(target),
                     );
                 }
             }
@@ -699,7 +727,7 @@ mod tests {
     #[test]
     fn test_parse_url_with_multiple_query_params() {
         let result =
-            FlakeInputRule::parse_flake_url("github:owner/repo?ref=v1&rev=abc123&submodules=true")
+            FlakeInputRule::parse_flake_url("github:owner/repo?ref=v1&submodules=true&rev=abc123")
                 .unwrap();
         if let FlakeUrl::GitHub { owner, repo } = result.flake_url {
             assert_eq!(owner, "owner");
@@ -708,6 +736,21 @@ mod tests {
             panic!("Expected GitHub");
         }
         assert_eq!(result.inline_ref.as_deref(), Some("v1"));
+        assert_eq!(result.extra_params.len(), 2);
+        assert_eq!(result.extra_params[0], "submodules=true");
+        assert_eq!(result.extra_params[1], "rev=abc123");
+    }
+
+    #[test]
+    fn test_reconstruct_url_preserves_extra_params() {
+        let new_url = FlakeInputRule::reconstruct_url(
+            "git+https://example.com/repo.git?submodules=true&ref=v1.0",
+            "v2.0",
+        );
+        assert_eq!(
+            new_url,
+            Some("git+https://example.com/repo.git?ref=v2.0&submodules=true".to_string())
+        );
     }
 
     #[test]

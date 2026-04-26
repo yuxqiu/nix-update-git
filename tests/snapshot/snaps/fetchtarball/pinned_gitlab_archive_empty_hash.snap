@@ -6,6 +6,7 @@ input_file: tests/snapshot/data/fetchtarball/pinned_gitlab_archive_empty_hash.ni
 [
   {
     "rule": "fetcher",
+    "target": "gitlab.com/procps-ng/procps",
     "field": "fetchTarball.sha256",
     "old": "\"\"",
     "new": "\"1sgsmcy47fmj99if01s805f22s4kislj8121waypgbvhvwyqnm8r\"",

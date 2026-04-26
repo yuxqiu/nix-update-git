@@ -6,6 +6,7 @@ input_file: tests/snapshot/data/fetchtarball/pinned_github_archive_empty_hash.ni
 [
   {
     "rule": "fetcher",
+    "target": "github.com/yuxqiu/nix-update-git",
     "field": "fetchTarball.sha256",
     "old": "\"\"",
     "new": "\"026sl2nbq2gk1fysrh0iqg7gh30y97sfaw43qwa0p6pc01m3k1ay\"",

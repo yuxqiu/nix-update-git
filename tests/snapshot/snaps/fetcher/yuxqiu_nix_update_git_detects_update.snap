@@ -6,6 +6,7 @@ input_file: tests/snapshot/data/fetcher/yuxqiu_nix_update_git_detects_update.nix
 [
   {
     "rule": "fetcher",
+    "target": "yuxqiu/nix-update-git",
     "field": "fetchFromGitHub.rev",
     "old": "\"v0.1.0\"",
     "range": [
@@ -15,6 +16,7 @@ input_file: tests/snapshot/data/fetcher/yuxqiu_nix_update_git_detects_update.nix
   },
   {
     "rule": "fetcher",
+    "target": "yuxqiu/nix-update-git",
     "field": "fetchFromGitHub.hash",
     "old": "\"sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\"",
     "range": [

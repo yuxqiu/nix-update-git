@@ -12,6 +12,8 @@ pub struct SnapshotEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rule: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub field: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub old: Option<String>,
@@ -50,6 +52,7 @@ fn parse_json(json: &str, redact_fields: &HashSet<String>) -> Vec<SnapshotEntry>
                 v["range"][0].as_u64().unwrap_or(0) as usize,
                 v["range"][1].as_u64().unwrap_or(0) as usize,
             ];
+            let target = v["target"].as_str().map(|s| s.to_string());
 
             SnapshotEntry {
                 rule: if redact_fields.contains("rule") {
@@ -76,6 +79,11 @@ fn parse_json(json: &str, redact_fields: &HashSet<String>) -> Vec<SnapshotEntry>
                     None
                 } else {
                     Some(range)
+                },
+                target: if redact_fields.contains("target") {
+                    None
+                } else {
+                    target
                 },
             }
         })
