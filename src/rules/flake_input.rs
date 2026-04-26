@@ -57,6 +57,8 @@ impl FlakeUrl {
             FlakeUrl::GitRemote { url } => url
                 .strip_prefix("https://")
                 .or_else(|| url.strip_prefix("http://"))
+                .or_else(|| url.strip_prefix("ssh://"))
+                .or_else(|| url.strip_prefix("git://"))
                 .unwrap_or(url)
                 .to_string(),
             FlakeUrl::GitLocal { path } => path.clone(),

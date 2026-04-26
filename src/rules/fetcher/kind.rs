@@ -290,9 +290,10 @@ impl FetcherKind {
             }),
             Self::FetchFromGitiles | Self::FetchGit | Self::BuiltinsFetchGit => {
                 parsed.strings.get("url").map(|url| {
-                    // strip url prefix only
                     url.strip_prefix("https://")
                         .or_else(|| url.strip_prefix("http://"))
+                        .or_else(|| url.strip_prefix("ssh://"))
+                        .or_else(|| url.strip_prefix("git://"))
                         .unwrap_or(url)
                         .to_string()
                 })
