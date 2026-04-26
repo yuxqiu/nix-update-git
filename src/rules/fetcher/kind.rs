@@ -225,6 +225,53 @@ impl FetcherKind {
     pub fn operational_keys(&self) -> Vec<&'static str> {
         self.attr_spec().iter().map(|s| s.key).collect()
     }
+
+    pub fn display_detail(&self, parsed: &ParsedAttrs) -> Option<String> {
+        match self {
+            Self::FetchFromGitHub => {
+                let owner = parsed.strings.get("owner")?;
+                let repo = parsed.strings.get("repo")?;
+                Some(format!("{}/{}", owner, repo))
+            }
+            Self::FetchFromGitLab => {
+                let owner = parsed.strings.get("owner")?;
+                let repo = parsed.strings.get("repo")?;
+                let domain = parsed
+                    .strings
+                    .get("domain")
+                    .map(|s| s.as_str())
+                    .unwrap_or("gitlab.com");
+                Some(format!("{}/{}@{}", owner, repo, domain))
+            }
+            Self::FetchFromGitea | Self::FetchFromForgejo => {
+                let domain = parsed.strings.get("domain")?;
+                let owner = parsed.strings.get("owner")?;
+                let repo = parsed.strings.get("repo")?;
+                Some(format!("{}/{}@{}", owner, repo, domain))
+            }
+            Self::FetchFromCodeberg => {
+                let owner = parsed.strings.get("owner")?;
+                let repo = parsed.strings.get("repo")?;
+                Some(format!("{}/{}", owner, repo))
+            }
+            Self::FetchFromSourcehut => {
+                let owner = parsed.strings.get("owner")?;
+                let repo = parsed.strings.get("repo")?;
+                Some(format!("{}/{}", owner, repo))
+            }
+            Self::FetchFromBitbucket => {
+                let owner = parsed.strings.get("owner")?;
+                let repo = parsed.strings.get("repo")?;
+                Some(format!("{}/{}", owner, repo))
+            }
+            Self::FetchFromGitiles => parsed.strings.get("url").cloned(),
+            Self::FetchFromRepoOrCz => parsed.strings.get("repo").cloned(),
+            Self::FetchGit | Self::FetchPatch | Self::FetchTarball => {
+                parsed.strings.get("url").cloned()
+            }
+            Self::BuiltinsFetchGit => parsed.strings.get("url").cloned(),
+        }
+    }
 }
 
 // --- Attribute specs per fetcher kind ---

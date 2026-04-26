@@ -14,6 +14,8 @@ pub struct UpdateEntry {
     old: String,
     new: String,
     range: [usize; 2],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
 }
 
 impl UpdateEntry {
@@ -26,6 +28,7 @@ impl UpdateEntry {
             old: old_text.to_string(),
             new: u.replacement.clone(),
             range: [u.range.start, u.range.end],
+            detail: u.detail.clone(),
         }
     }
 }
@@ -36,11 +39,18 @@ pub fn print_updates(fr: &FileResult) {
             "{}: Found {} update(s) from rule '{}':",
             fr.file_path.display(),
             updates.len(),
-            rule_name
+            rule_name,
         );
         for u in updates {
             let old_text = &fr.content[u.range.start..u.range.end];
-            println!("  - {}: {} -> {}", u.field, old_text, u.replacement);
+            if let Some(detail) = u.detail.as_deref() {
+                println!(
+                    "  - {} ({}): {} -> {}",
+                    u.field, detail, old_text, u.replacement
+                );
+            } else {
+                println!("  - {}: {} -> {}", u.field, old_text, u.replacement);
+            }
         }
     }
 }

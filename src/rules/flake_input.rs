@@ -40,6 +40,16 @@ impl FlakeUrl {
             FlakeUrl::GitLocal { path } => Some(path.clone()),
         }
     }
+
+    fn display_short(&self) -> String {
+        match self {
+            FlakeUrl::GitHub { owner, repo } => format!("{}/{}", owner, repo),
+            FlakeUrl::GitLab { owner, repo } => format!("{}/{}", owner, repo),
+            FlakeUrl::SourceHut { owner, repo } => format!("{}/{}", owner, repo),
+            FlakeUrl::GitRemote { url } => url.clone(),
+            FlakeUrl::GitLocal { path } => path.clone(),
+        }
+    }
 }
 
 struct ParsedFlakeUrl {
@@ -471,24 +481,32 @@ impl UpdateRule for FlakeInputRule {
                 None => continue,
             };
 
+            let detail = parsed.flake_url.display_short();
+
             if let Ok(Some(latest_tag)) =
                 GitFetcher::get_latest_tag_matching(&remote_url, Some(&ref_sv.value))
                 && VersionDetector::compare(&ref_sv.value, &latest_tag) == std::cmp::Ordering::Less
             {
                 if input_def.inline_ref {
                     if let Some(new_url) = Self::reconstruct_url(&url_sv.value, &latest_tag) {
-                        updates.push(Update::new(
-                            format!("inputs.{}.url", input_def.name),
-                            format!("\"{}\"", new_url),
-                            url_sv.range,
-                        ));
+                        updates.push(
+                            Update::new(
+                                format!("inputs.{}.url", input_def.name),
+                                format!("\"{}\"", new_url),
+                                url_sv.range,
+                            )
+                            .with_detail(detail),
+                        );
                     }
                 } else {
-                    updates.push(Update::new(
-                        format!("inputs.{}.ref", input_def.name),
-                        format!("\"{}\"", latest_tag),
-                        ref_sv.range,
-                    ));
+                    updates.push(
+                        Update::new(
+                            format!("inputs.{}.ref", input_def.name),
+                            format!("\"{}\"", latest_tag),
+                            ref_sv.range,
+                        )
+                        .with_detail(detail),
+                    );
                 }
             }
         }

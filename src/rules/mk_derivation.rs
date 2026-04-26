@@ -479,7 +479,19 @@ impl UpdateRule for MkDerivationRule {
             Some(call) => call,
             None => return Ok(None),
         };
-        Self::check_mk_derivation_call(&call)
+
+        let detail = call.fetcher_kind.display_detail(&call.fetcher_parsed);
+
+        let mut updates = match Self::check_mk_derivation_call(&call)? {
+            Some(updates) => updates,
+            None => return Ok(None),
+        };
+
+        for update in updates.iter_mut() {
+            update.detail = detail.clone();
+        }
+
+        Ok(Some(updates))
     }
 }
 

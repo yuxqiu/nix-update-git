@@ -907,9 +907,11 @@ impl UpdateRule for FetcherRule {
             None => return Ok(None),
         };
 
-        match call.kind {
-            FetcherKind::FetchPatch => Self::check_fetchpatch_call(&call),
-            FetcherKind::FetchTarball => Self::check_fetchtarball_call(&call),
+        let detail = call.kind.display_detail(&call.parsed);
+
+        let mut updates = match call.kind {
+            FetcherKind::FetchPatch => Self::check_fetchpatch_call(&call)?,
+            FetcherKind::FetchTarball => Self::check_fetchtarball_call(&call)?,
             FetcherKind::BuiltinsFetchGit
             | FetcherKind::FetchGit
             | FetcherKind::FetchFromGitHub
@@ -920,8 +922,16 @@ impl UpdateRule for FetcherRule {
             | FetcherKind::FetchFromBitbucket
             | FetcherKind::FetchFromSourcehut
             | FetcherKind::FetchFromGitiles
-            | FetcherKind::FetchFromRepoOrCz => self.check_fetcher_call(&call),
+            | FetcherKind::FetchFromRepoOrCz => self.check_fetcher_call(&call)?,
+        };
+
+        if let Some(updates) = &mut updates {
+            for update in updates.iter_mut() {
+                update.detail = detail.clone();
+            }
         }
+
+        Ok(updates)
     }
 }
 

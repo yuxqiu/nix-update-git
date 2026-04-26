@@ -7,6 +7,7 @@ pub struct Update {
     pub replacement: String,
     pub range: TextRange,
     pub rule_name: String,
+    pub detail: Option<String>,
 }
 
 impl Update {
@@ -16,7 +17,13 @@ impl Update {
             replacement: replacement.into(),
             range,
             rule_name: String::new(),
+            detail: None,
         }
+    }
+
+    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
+        self
     }
 }
 
