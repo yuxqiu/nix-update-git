@@ -232,7 +232,7 @@ impl FetcherKind {
             Self::FetchFromGitHub => {
                 let owner = parsed.strings.get("owner")?;
                 let repo = parsed.strings.get("repo")?;
-                Some(format!("{}/{}", owner, repo))
+                Some(format!("github.com/{}/{}", owner, repo))
             }
             Self::FetchFromGitLab => {
                 let owner = parsed.strings.get("owner")?;
@@ -242,37 +242,60 @@ impl FetcherKind {
                     .get("domain")
                     .map(|s| s.as_str())
                     .unwrap_or("gitlab.com");
-                Some(format!("{}/{}@{}", owner, repo, domain))
+                Some(format!("{}/{}/{}", domain, owner, repo))
             }
             Self::FetchFromGitea | Self::FetchFromForgejo => {
                 let domain = parsed.strings.get("domain")?;
                 let owner = parsed.strings.get("owner")?;
                 let repo = parsed.strings.get("repo")?;
-                Some(format!("{}/{}@{}", owner, repo, domain))
+                Some(format!("{}/{}/{}", domain, owner, repo))
             }
             Self::FetchFromCodeberg => {
                 let owner = parsed.strings.get("owner")?;
                 let repo = parsed.strings.get("repo")?;
-                Some(format!("{}/{}", owner, repo))
+                Some(format!("codeberg.org/{}/{}", owner, repo))
             }
             Self::FetchFromSourcehut => {
                 let owner = parsed.strings.get("owner")?;
                 let repo = parsed.strings.get("repo")?;
-                Some(format!("{}/{}", owner, repo))
+                let domain = parsed
+                    .strings
+                    .get("domain")
+                    .map(|s| s.as_str())
+                    .unwrap_or("sr.ht");
+                let vc = parsed
+                    .strings
+                    .get("vc")
+                    .map(|s| s.as_str())
+                    .unwrap_or("git");
+                let owner_with_tilde = if owner.starts_with('~') {
+                    owner.clone()
+                } else {
+                    format!("~{}", owner)
+                };
+                Some(format!("{}.{}/{}/{}", vc, domain, owner_with_tilde, repo))
             }
             Self::FetchFromBitbucket => {
                 let owner = parsed.strings.get("owner")?;
                 let repo = parsed.strings.get("repo")?;
-                Some(format!("{}/{}", owner, repo))
+                Some(format!("bitbucket.org/{}/{}", owner, repo))
             }
-            Self::FetchFromRepoOrCz => parsed.strings.get("repo").cloned(),
+            Self::FetchFromRepoOrCz => {
+                let repo = parsed.strings.get("repo")?;
+                Some(format!("repo.or.cz/{}.git", repo))
+            }
             Self::FetchPatch | Self::FetchTarball => parsed.strings.get("url").and_then(|url| {
                 let parsed = parse_source_url(url)?;
                 Some(format!("{}/{}", parsed.domain, parsed.project))
             }),
-            // these categories report unstructured url
             Self::FetchFromGitiles | Self::FetchGit | Self::BuiltinsFetchGit => {
-                parsed.strings.get("url").cloned()
+                parsed.strings.get("url").map(|url| {
+                    // strip url prefix only
+                    url.strip_prefix("https://")
+                        .or_else(|| url.strip_prefix("http://"))
+                        .unwrap_or(url)
+                        .to_string()
+                })
             }
         }
     }

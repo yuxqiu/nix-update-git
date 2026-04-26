@@ -6,7 +6,7 @@ input_file: tests/snapshot/data/fetchgit_parity/pinned_leave_dot_git.nix
 [
   {
     "rule": "fetcher",
-    "target": "https://github.com/expipiplus1/update-nix-fetchgit",
+    "target": "github.com/expipiplus1/update-nix-fetchgit",
     "field": "fetchgit.hash",
     "old": "\"\"",
     "new": "\"sha256-My/teplp1E3XDhFuLcGdj69jeltY05WvDYmRpPw1vzg=\"",

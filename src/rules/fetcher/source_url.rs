@@ -316,8 +316,10 @@ fn split_archive_suffix(s: &str) -> Option<(String, String)> {
 pub(crate) fn parse_source_url(url: &str) -> Option<ParsedSourceUrl> {
     let url = url.trim();
 
-    // Must start with https://
-    let rest = url.strip_prefix("https://")?;
+    // Must start with https:// or http://
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
 
     // Separate fragment (discard) and query string (preserve).
     let (before_fragment, _) = rest.split_once('#').unwrap_or((rest, ""));
@@ -1112,11 +1114,10 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_http_returns_none() {
-        assert_eq!(
-            parse_source_url("http://github.com/owner/repo/commit/abc123.patch"),
-            None
-        );
+    fn test_parse_http_url() {
+        let result = parse_source_url("http://github.com/owner/repo/commit/abc123.patch").unwrap();
+        assert_eq!(result.domain, "github.com");
+        assert_eq!(result.project, "owner/repo");
     }
 
     #[test]

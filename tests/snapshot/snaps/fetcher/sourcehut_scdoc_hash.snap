@@ -6,7 +6,7 @@ input_file: tests/snapshot/data/fetcher/sourcehut_scdoc_hash.nix
 [
   {
     "rule": "fetcher",
-    "target": "~sircmpwn/scdoc",
+    "target": "git.sr.ht/~sircmpwn/scdoc",
     "field": "fetchFromSourcehut.hash",
     "old": "\"\"",
     "new": "\"sha256-1BR66/o0FOALXFVCRr69yUYmY5XygPA9FpMR4xTlLgs=\"",

@@ -43,10 +43,22 @@ impl FlakeUrl {
 
     fn display_target(&self) -> String {
         match self {
-            FlakeUrl::GitHub { owner, repo } => format!("{}/{}", owner, repo),
-            FlakeUrl::GitLab { owner, repo } => format!("{}/{}", owner, repo),
-            FlakeUrl::SourceHut { owner, repo } => format!("{}/{}", owner, repo),
-            FlakeUrl::GitRemote { url } => url.clone(),
+            FlakeUrl::GitHub { owner, repo } => format!("github.com/{}/{}", owner, repo),
+            FlakeUrl::GitLab { owner, repo } => format!("gitlab.com/{}/{}", owner, repo),
+            FlakeUrl::SourceHut { owner, repo } => {
+                let owner_with_tilde = if owner.starts_with('~') {
+                    owner.clone()
+                } else {
+                    format!("~{}", owner)
+                };
+                format!("git.sr.ht/{}/{}", owner_with_tilde, repo)
+            }
+            // strip url prefix only
+            FlakeUrl::GitRemote { url } => url
+                .strip_prefix("https://")
+                .or_else(|| url.strip_prefix("http://"))
+                .unwrap_or(url)
+                .to_string(),
             FlakeUrl::GitLocal { path } => path.clone(),
         }
     }

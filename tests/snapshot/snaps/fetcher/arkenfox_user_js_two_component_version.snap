@@ -6,7 +6,7 @@ input_file: tests/snapshot/data/fetcher/arkenfox_user_js_two_component_version.n
 [
   {
     "rule": "fetcher",
-    "target": "arkenfox/user.js",
+    "target": "github.com/arkenfox/user.js",
     "field": "fetchFromGitHub.rev",
     "old": "\"140.0\"",
     "range": [
@@ -16,7 +16,7 @@ input_file: tests/snapshot/data/fetcher/arkenfox_user_js_two_component_version.n
   },
   {
     "rule": "fetcher",
-    "target": "arkenfox/user.js",
+    "target": "github.com/arkenfox/user.js",
     "field": "fetchFromGitHub.hash",
     "old": "\"sha256-LPDiiEPOZu5Ah5vCLyCMT3w1uoBhUjyqoPWCOiLVLnw=\"",
     "range": [

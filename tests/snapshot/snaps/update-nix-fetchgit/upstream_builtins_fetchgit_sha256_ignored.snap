@@ -6,7 +6,7 @@ input_file: tests/snapshot/data/update-nix-fetchgit/upstream_builtins_fetchgit_s
 [
   {
     "rule": "fetcher",
-    "target": "https://github.com/expipiplus1/update-nix-fetchgit",
+    "target": "github.com/expipiplus1/update-nix-fetchgit",
     "field": "builtins.fetchGit.ref",
     "old": "\"v0.2.1\"",
     "range": [

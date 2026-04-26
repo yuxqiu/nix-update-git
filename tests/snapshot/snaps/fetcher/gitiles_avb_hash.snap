@@ -6,7 +6,7 @@ input_file: tests/snapshot/data/fetcher/gitiles_avb_hash.nix
 [
   {
     "rule": "fetcher",
-    "target": "https://android.googlesource.com/platform/external/avb",
+    "target": "android.googlesource.com/platform/external/avb",
     "field": "fetchFromGitiles.hash",
     "old": "\"\"",
     "new": "\"sha256-ne8pAJ1fT2BQP7FmQ9pEjHixCNtXdNHPBIATbf9oZeg=\"",
