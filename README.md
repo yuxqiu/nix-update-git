@@ -9,6 +9,7 @@ Update git references in Nix flake files and Nix expressions.
 - **Flake inputs**: update `ref` values and inline `?ref=` in URL strings
 - **Fetcher calls**: update `rev`, `tag`, and `ref` in `fetchgit`, `fetchFromGitHub`, `fetchFromGitLab`, `fetchFromGitea`, `fetchFromForgejo`, `fetchFromCodeberg`, `fetchFromSourcehut`, `fetchFromBitbucket`, `fetchFromRepoOrCz`, `fetchFromGitiles`, `fetchpatch`, `fetchTarball`, and `builtins.fetchGit`
 - **mkDerivation**: update `version` and corresponding source ref (`tag`/`rev`/`ref`) and hash in `stdenv.mkDerivation rec { ... }` patterns
+- **Derivation rules**: additional rules for language-specific builders (`buildRustPackage`, `buildGoModule`, `buildPythonPackage`, etc.) that follow the same `version` + `src` pattern as `mkDerivation`; not enabled by default due to extra dependencies (e.g. `cargoHash`, `vendorHash`)
 - **Branch following**: use `# follow:branch <name>` comments to track a branch's latest commit instead of version tags
 - **Pinning**: `# pin` comments on any input or fetcher call skips it entirely
 - **Multiple modes**: check (default), update, and interactive
@@ -47,6 +48,7 @@ Options:
   -v, --verbose          Enable verbose output
       --format <FORMAT>  Output format [default: text] [possible values: text, json]
   -j, --jobs <N>         Number of parallel file processing jobs [default: 4]
+  -r, --rules <RULES>... Rules to enable [default: fetcher flake mk-derivation]
   -h, --help             Print help
   -V, --version          Print version
 ```
@@ -99,6 +101,38 @@ Outputs machine-readable JSON:
 ```
 
 Combine with `--update` to apply changes and get a JSON summary of what was updated.
+
+## Rules
+
+`nix-update-git` uses rules to detect and apply updates. Each rule targets a specific pattern. By default, `fetcher`, `flake`, and `mk-derivation` are enabled. Additional derivation rules can be enabled via `--rules`:
+
+```bash
+# Enable buildRustPackage rule alongside defaults
+nix-update-git --rules fetcher --rules flake --rules mk-derivation --rules build-rust-package file.nix
+
+# Enable all rules
+nix-update-git --rules all file.nix
+```
+
+### Available rules
+
+| Rule | Default | Nix function names | Description |
+| --- | --- | --- | --- |
+| `fetcher` | yes | — | Standalone fetcher calls (`fetchgit`, `fetchFromGitHub`, etc.) |
+| `flake` | yes | — | Flake input URLs and refs |
+| `mk-derivation` | yes | `mkDerivation` | `stdenv.mkDerivation rec { version = ...; src = fetchX { ... }; }` |
+| `build-rust-package` | no | `buildRustPackage` | Rust packages (note: does not update `cargoHash`/`cargoHash`) |
+| `build-go-module` | no | `buildGoModule`, `buildGoPackage` | Go modules (note: does not update `vendorHash`) |
+| `build-python-package` | no | `buildPythonPackage`, `buildPythonApplication` | Python packages |
+| `build-dune-package` | no | `buildDunePackage` | OCaml/Dune packages |
+| `build-npm-package` | no | `buildNpmPackage` | Node.js packages |
+| `build-mix-package` | no | `buildMixPackage` | Elixir packages |
+| `build-rebar3-release` | no | `buildRebar3Release` | Erlang packages |
+| `build-gem` | no | `buildGem` | Ruby gems |
+| `build-haskell-package` | no | `buildHaskellPackage`, `mkHaskellPackage` | Haskell packages |
+| `build-emscripten-package` | no | `buildEmscriptenPackage` | Emscripten packages |
+
+The `fetcher` rule never processes `src =` attributes inside any of the derivation-wrapper functions above — the derivation rules handle those exclusively. Enabling a derivation rule is needed for version updates in those patterns; the fetcher rule handles standalone fetcher calls regardless.
 
 ## Supported patterns
 
