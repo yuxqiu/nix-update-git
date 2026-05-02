@@ -6,6 +6,25 @@ pub enum OutputFormat {
     Json,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum RuleName {
+    All,
+    Fetcher,
+    Flake,
+    MkDerivation,
+}
+
+impl RuleName {
+    pub fn is_enabled(&self, name: &str) -> bool {
+        match self {
+            RuleName::All => true,
+            RuleName::Fetcher => name == "fetcher",
+            RuleName::Flake => name == "flake_input",
+            RuleName::MkDerivation => name == "mk_derivation",
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "nix-update-git")]
 #[command(version = concat!("v", env!("CARGO_PKG_VERSION"), "-", env!("GIT_HASH")))]
@@ -37,4 +56,14 @@ pub struct Cli {
         help = "Number of parallel file processing jobs"
     )]
     pub jobs: usize,
+
+    #[arg(
+        short,
+        long,
+        value_enum,
+        num_args = 1..,
+        default_values_t = [RuleName::Fetcher, RuleName::Flake, RuleName::MkDerivation],
+        help = "Rules to enable"
+    )]
+    pub rules: Vec<RuleName>,
 }

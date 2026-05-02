@@ -62,9 +62,18 @@ fn main() -> Result<()> {
         .build_global()?;
 
     let mut registry = RuleRegistry::new();
-    registry.register(FlakeInputRule);
-    registry.register(FetcherRule);
-    registry.register(MkDerivationRule);
+    let rules = &cli.rules;
+    let rule_enabled = |name: &str| rules.iter().any(|r| r.is_enabled(name));
+
+    if rule_enabled("flake_input") {
+        registry.register(FlakeInputRule);
+    }
+    if rule_enabled("fetcher") {
+        registry.register(FetcherRule);
+    }
+    if rule_enabled("mk_derivation") {
+        registry.register(MkDerivationRule);
+    }
 
     let results: Vec<_> = files.par_iter().map(|p| check_file(p, &registry)).collect();
 
