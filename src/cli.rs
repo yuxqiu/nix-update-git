@@ -12,17 +12,48 @@ pub enum RuleName {
     Fetcher,
     Flake,
     MkDerivation,
+    BuildRustPackage,
+    BuildGoModule,
+    BuildPythonPackage,
+    BuildDunePackage,
+    BuildNpmPackage,
+    BuildMixPackage,
+    BuildRebar3Release,
+    BuildGem,
+    BuildHaskellPackage,
+    BuildEmscriptenPackage,
 }
 
 impl RuleName {
-    pub fn is_enabled(&self, name: &str) -> bool {
+    pub fn rule_id(&self) -> &'static str {
         match self {
-            RuleName::All => true,
-            RuleName::Fetcher => name == "fetcher",
-            RuleName::Flake => name == "flake_input",
-            RuleName::MkDerivation => name == "mk_derivation",
+            RuleName::All => "all",
+            RuleName::Fetcher => "fetcher",
+            RuleName::Flake => "flake",
+            RuleName::MkDerivation => "mk-derivation",
+            RuleName::BuildRustPackage => "build-rust-package",
+            RuleName::BuildGoModule => "build-go-module",
+            RuleName::BuildPythonPackage => "build-python-package",
+            RuleName::BuildDunePackage => "build-dune-package",
+            RuleName::BuildNpmPackage => "build-npm-package",
+            RuleName::BuildMixPackage => "build-mix-package",
+            RuleName::BuildRebar3Release => "build-rebar3-release",
+            RuleName::BuildGem => "build-gem",
+            RuleName::BuildHaskellPackage => "build-haskell-package",
+            RuleName::BuildEmscriptenPackage => "build-emscripten-package",
         }
     }
+
+    pub fn is_enabled(&self, name: &str) -> bool {
+        if matches!(self, RuleName::All) {
+            return true;
+        }
+        self.rule_id() == name
+    }
+}
+
+pub fn default_rules() -> Vec<RuleName> {
+    vec![RuleName::Fetcher, RuleName::Flake, RuleName::MkDerivation]
 }
 
 #[derive(Parser, Debug)]
@@ -62,7 +93,7 @@ pub struct Cli {
         long,
         value_enum,
         num_args = 1..,
-        default_values_t = [RuleName::Fetcher, RuleName::Flake, RuleName::MkDerivation],
+        default_values_t = default_rules(),
         help = "Rules to enable"
     )]
     pub rules: Vec<RuleName>,

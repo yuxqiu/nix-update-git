@@ -7,7 +7,7 @@ input_file: tests/snapshot/data/update-nix-fetchgit/upstream_version_shared_with
   {
     "rule": "mk-derivation",
     "target": "github.com/expipiplus1/update-nix-fetchgit",
-    "field": "mkDerivation.version",
+    "field": "mk-derivation.version",
     "old": "\"v0.2.1\"",
     "range": [
       256,

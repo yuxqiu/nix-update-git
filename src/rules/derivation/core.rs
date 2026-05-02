@@ -10,7 +10,7 @@ use crate::rules::fetcher::{
 use crate::rules::traits::{Update, UpdateRule};
 use crate::utils::{GitFetcher, NarHash, VersionDetector};
 
-struct MkDerivationCall {
+struct DerivationCall {
     version_value: String,
     version_range: TextRange,
     source_ref_key: Option<String>,
@@ -32,14 +32,23 @@ enum SourceRefValue {
     },
 }
 
-#[derive(Default)]
-pub struct MkDerivationRule;
+pub struct DerivationRule {
+    rule_name: String,
+    func_names: Vec<String>,
+}
 
-impl MkDerivationRule {
-    fn try_extract_call(node: &NixNode) -> Option<MkDerivationCall> {
+impl DerivationRule {
+    pub fn new(rule_name: &str, func_names: Vec<String>) -> Self {
+        Self {
+            rule_name: rule_name.to_string(),
+            func_names,
+        }
+    }
+
+    fn try_extract_call(&self, node: &NixNode) -> Option<DerivationCall> {
         let func_name = node.apply_function_name()?;
         let short_name = func_name.rsplit('.').next().unwrap_or(&func_name);
-        if short_name != "mkDerivation" {
+        if !self.func_names.iter().any(|n| n == short_name) {
             return None;
         }
 
@@ -227,7 +236,7 @@ impl MkDerivationRule {
             || src_arg.has_pin_comment()
             || src_value.has_pin_comment();
 
-        Some(MkDerivationCall {
+        Some(DerivationCall {
             version_value: version_content,
             version_range: version_node.text_range(),
             source_ref_key,
@@ -274,7 +283,10 @@ impl MkDerivationRule {
         Some(middle.to_string())
     }
 
-    fn check_mk_derivation_call(call: &MkDerivationCall) -> Result<Option<Vec<Update>>> {
+    fn check_derivation_call(
+        rule_name: &str,
+        call: &DerivationCall,
+    ) -> Result<Option<Vec<Update>>> {
         if call.pinned {
             return Ok(None);
         }
@@ -369,7 +381,7 @@ impl MkDerivationRule {
             == std::cmp::Ordering::Less;
         if version_updated {
             updates.push(Update::new(
-                "mkDerivation.version",
+                format!("{}.version", rule_name),
                 format!("\"{}\"", target_version),
                 call.version_range,
             ));
@@ -465,9 +477,9 @@ impl MkDerivationRule {
     }
 }
 
-impl UpdateRule for MkDerivationRule {
+impl UpdateRule for DerivationRule {
     fn name(&self) -> &str {
-        "mk-derivation"
+        &self.rule_name
     }
 
     fn matches(&self, node: &NixNode) -> bool {
@@ -475,14 +487,14 @@ impl UpdateRule for MkDerivationRule {
     }
 
     fn check(&self, node: &NixNode) -> Result<Option<Vec<Update>>> {
-        let call = match Self::try_extract_call(node) {
+        let call = match self.try_extract_call(node) {
             Some(call) => call,
             None => return Ok(None),
         };
 
         let target = call.fetcher_kind.display_target(&call.fetcher_parsed);
 
-        let mut updates = match Self::check_mk_derivation_call(&call)? {
+        let mut updates = match Self::check_derivation_call(&self.rule_name, &call)? {
             Some(updates) => updates,
             None => return Ok(None),
         };

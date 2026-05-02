@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 
 use crate::parser::{NixNode, ParsedAttrs};
+use crate::rules::derivation::OWNED_FUNC_NAMES;
 use crate::rules::traits::{Update, UpdateRule};
 use crate::utils::{GitFetcher, NarHash, VersionDetector};
 
@@ -267,7 +268,6 @@ struct FetcherCall {
     follow: Option<String>,
 }
 
-#[derive(Default)]
 pub struct FetcherRule;
 
 impl FetcherRule {
@@ -823,67 +823,63 @@ impl FetcherRule {
             HashStrategy::None => anyhow::bail!("No hash needed for this fetcher"),
         }
     }
+}
 
-    fn is_src_of_active_mk_derivation(node: &NixNode) -> bool {
-        let mut current = match node.parent() {
+fn is_src_of_owned_call(node: &NixNode) -> bool {
+    let mut current = match node.parent() {
+        Some(p) => p,
+        None => return false,
+    };
+
+    while current.kind() == rnix::SyntaxKind::NODE_PAREN {
+        current = match current.parent() {
             Some(p) => p,
             None => return false,
         };
-
-        while current.kind() == rnix::SyntaxKind::NODE_PAREN {
-            current = match current.parent() {
-                Some(p) => p,
-                None => return false,
-            };
-        }
-
-        if current.kind() != rnix::SyntaxKind::NODE_ATTRPATH_VALUE {
-            return false;
-        }
-        let segments = current.attrpath_segments();
-        if segments.len() != 1 || segments[0] != "src" {
-            return false;
-        }
-
-        let attr_set = match current.parent() {
-            Some(p) => p,
-            None => return false,
-        };
-        if attr_set.kind() != rnix::SyntaxKind::NODE_ATTR_SET {
-            return false;
-        }
-
-        let mut mk_derivation_apply = match attr_set.parent() {
-            Some(p) => p,
-            None => return false,
-        };
-        if mk_derivation_apply.kind() == rnix::SyntaxKind::NODE_LAMBDA {
-            mk_derivation_apply = match mk_derivation_apply.parent() {
-                Some(p) => p,
-                None => return false,
-            };
-        }
-        if mk_derivation_apply.kind() == rnix::SyntaxKind::NODE_PAREN {
-            mk_derivation_apply = match mk_derivation_apply.parent() {
-                Some(p) => p,
-                None => return false,
-            };
-        }
-        if mk_derivation_apply.kind() != rnix::SyntaxKind::NODE_APPLY {
-            return false;
-        }
-
-        let func_name = match mk_derivation_apply.apply_function_name() {
-            Some(name) => name,
-            None => return false,
-        };
-        let short_name = func_name.rsplit('.').next().unwrap_or(&func_name);
-        if short_name != "mkDerivation" {
-            return false;
-        }
-
-        true
     }
+
+    if current.kind() != rnix::SyntaxKind::NODE_ATTRPATH_VALUE {
+        return false;
+    }
+    let segments = current.attrpath_segments();
+    if segments.len() != 1 || segments[0] != "src" {
+        return false;
+    }
+
+    let attr_set = match current.parent() {
+        Some(p) => p,
+        None => return false,
+    };
+    if attr_set.kind() != rnix::SyntaxKind::NODE_ATTR_SET {
+        return false;
+    }
+
+    let mut apply_node = match attr_set.parent() {
+        Some(p) => p,
+        None => return false,
+    };
+    if apply_node.kind() == rnix::SyntaxKind::NODE_LAMBDA {
+        apply_node = match apply_node.parent() {
+            Some(p) => p,
+            None => return false,
+        };
+    }
+    if apply_node.kind() == rnix::SyntaxKind::NODE_PAREN {
+        apply_node = match apply_node.parent() {
+            Some(p) => p,
+            None => return false,
+        };
+    }
+    if apply_node.kind() != rnix::SyntaxKind::NODE_APPLY {
+        return false;
+    }
+
+    let func_name = match apply_node.apply_function_name() {
+        Some(name) => name,
+        None => return false,
+    };
+    let short_name = func_name.rsplit('.').next().unwrap_or(&func_name);
+    OWNED_FUNC_NAMES.contains(&short_name)
 }
 
 impl UpdateRule for FetcherRule {
@@ -895,7 +891,7 @@ impl UpdateRule for FetcherRule {
         if node.kind() != rnix::SyntaxKind::NODE_APPLY {
             return false;
         }
-        if Self::is_src_of_active_mk_derivation(node) {
+        if is_src_of_owned_call(node) {
             return false;
         }
         true
@@ -971,9 +967,7 @@ stdenv.mkDerivation rec {
 "#;
         let root = parse_root(content);
         let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
-        assert!(super::FetcherRule::is_src_of_active_mk_derivation(
-            &fetcher_node
-        ));
+        assert!(super::is_src_of_owned_call(&fetcher_node));
     }
 
     #[test]
@@ -989,9 +983,7 @@ stdenv.mkDerivation rec {
 "#;
         let root = parse_root(content);
         let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
-        assert!(!super::FetcherRule::is_src_of_active_mk_derivation(
-            &fetcher_node
-        ));
+        assert!(!super::is_src_of_owned_call(&fetcher_node));
     }
 
     #[test]
@@ -1009,9 +1001,7 @@ pkgs.stdenv.mkDerivation rec {
 "#;
         let root = parse_root(content);
         let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
-        assert!(super::FetcherRule::is_src_of_active_mk_derivation(
-            &fetcher_node
-        ));
+        assert!(super::is_src_of_owned_call(&fetcher_node));
     }
 
     #[test]
@@ -1029,9 +1019,7 @@ stdenv.mkDerivation rec {
 "#;
         let root = parse_root(content);
         let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
-        assert!(!super::FetcherRule::is_src_of_active_mk_derivation(
-            &fetcher_node
-        ));
+        assert!(!super::is_src_of_owned_call(&fetcher_node));
     }
 
     #[test]
@@ -1049,9 +1037,26 @@ someOtherFunc rec {
 "#;
         let root = parse_root(content);
         let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
-        assert!(!super::FetcherRule::is_src_of_active_mk_derivation(
-            &fetcher_node
-        ));
+        assert!(!super::is_src_of_owned_call(&fetcher_node));
+    }
+
+    #[test]
+    fn test_is_src_of_build_rust_package_returns_true() {
+        let content = r#"
+rustPlatform.buildRustPackage rec {
+  pname = "foo";
+  version = "1.0.0";
+  src = fetchgit {
+    url = "https://example.com/repo";
+    rev = "0000000000000000000000000000000000000000";
+    sha256 = "0nmyp5yrzl9dbq85wyiimsj9fklb8637a1936nw7zzvlnzkgh28n";
+  };
+  cargoHash = "";
+}
+"#;
+        let root = parse_root(content);
+        let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
+        assert!(super::is_src_of_owned_call(&fetcher_node));
     }
 
     #[test]
@@ -1312,9 +1317,7 @@ stdenv.mkDerivation (finalAttrs: {
 "#;
         let root = parse_root(content);
         let fetcher_node = find_fetcher_apply(&root, "fetchgit").unwrap();
-        assert!(super::FetcherRule::is_src_of_active_mk_derivation(
-            &fetcher_node
-        ));
+        assert!(super::is_src_of_owned_call(&fetcher_node));
     }
 
     #[test]

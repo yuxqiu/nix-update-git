@@ -32,7 +32,7 @@ fn test_mk_derivation_detects_version_and_rev_update() {
     cmd.arg(nix_path.to_str().unwrap());
     cmd.assert()
         .success()
-        .stdout(predicates::str::contains("mkDerivation.version"));
+        .stdout(predicates::str::contains("mk-derivation.version"));
 }
 
 #[test]
@@ -91,7 +91,7 @@ fn test_mk_derivation_updates_when_rev_matches_version() {
     cmd.arg(nix_path.to_str().unwrap());
     cmd.assert()
         .success()
-        .stdout(predicates::str::contains("mkDerivation.version"))
+        .stdout(predicates::str::contains("mk-derivation.version"))
         .stdout(predicates::str::contains("fetchgit.rev"));
 }
 
@@ -191,7 +191,7 @@ fn test_mk_derivation_with_pkgs_prefix() {
     cmd.arg(nix_path.to_str().unwrap());
     cmd.assert()
         .success()
-        .stdout(predicates::str::contains("mkDerivation.version"));
+        .stdout(predicates::str::contains("mk-derivation.version"));
 }
 
 #[test]
@@ -284,7 +284,7 @@ fn test_mk_derivation_hash_update() {
     cmd.arg(nix_path.to_str().unwrap());
     cmd.assert()
         .success()
-        .stdout(predicates::str::contains("mkDerivation.version"))
+        .stdout(predicates::str::contains("mk-derivation.version"))
         .stdout(predicates::str::contains("fetchgit.rev"))
         .stdout(predicates::str::contains("fetchgit.hash"));
 }
@@ -324,7 +324,7 @@ fn test_mk_derivation_interpolated_rev_updates_version_and_hash_only() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("mkDerivation.version"),
+        stdout.contains("mk-derivation.version"),
         "stdout: {}",
         stdout
     );
@@ -369,7 +369,7 @@ fn test_mk_derivation_populates_empty_rev_and_hash_from_version() {
     assert!(stdout.contains("fetchgit.rev"), "stdout: {}", stdout);
     assert!(stdout.contains("fetchgit.hash"), "stdout: {}", stdout);
     assert!(
-        !stdout.contains("mkDerivation.version"),
+        !stdout.contains("mk-derivation.version"),
         "stdout: {}",
         stdout
     );
@@ -409,7 +409,7 @@ fn test_mk_derivation_empty_rev_rehashes_existing_hash() {
     assert!(stdout.contains("fetchgit.rev"), "stdout: {}", stdout);
     assert!(stdout.contains("fetchgit.hash"), "stdout: {}", stdout);
     assert!(
-        !stdout.contains("mkDerivation.version"),
+        !stdout.contains("mk-derivation.version"),
         "stdout: {}",
         stdout
     );
@@ -452,7 +452,7 @@ fn test_mk_derivation_empty_hash_with_matching_rev_updates_hash_only() {
     assert!(stdout.contains("fetchgit.hash"), "stdout: {}", stdout);
     assert!(!stdout.contains("fetchgit.rev"), "stdout: {}", stdout);
     assert!(
-        !stdout.contains("mkDerivation.version"),
+        !stdout.contains("mk-derivation.version"),
         "stdout: {}",
         stdout
     );
@@ -483,7 +483,7 @@ fn test_mk_derivation_updates_tag_and_version_when_tag_matches_version() {
     cmd.arg(nix_path.to_str().unwrap());
     cmd.assert()
         .success()
-        .stdout(predicates::str::contains("mkDerivation.version"))
+        .stdout(predicates::str::contains("mk-derivation.version"))
         .stdout(predicates::str::contains("fetchgit.tag"));
 }
 
@@ -512,7 +512,7 @@ fn test_mk_derivation_updates_builtins_ref_and_version_when_ref_matches_version(
     cmd.arg(nix_path.to_str().unwrap());
     cmd.assert()
         .success()
-        .stdout(predicates::str::contains("mkDerivation.version"))
+        .stdout(predicates::str::contains("mk-derivation.version"))
         .stdout(predicates::str::contains("builtins.fetchGit.ref"));
 }
 
@@ -542,7 +542,7 @@ fn test_mk_derivation_lambda_wrapped_detects_update() {
     cmd.arg(nix_path.to_str().unwrap());
     cmd.assert()
         .success()
-        .stdout(predicates::str::contains("mkDerivation.version"))
+        .stdout(predicates::str::contains("mk-derivation.version"))
         .stdout(predicates::str::contains("fetchgit.rev"));
 }
 
@@ -619,7 +619,7 @@ fn test_mk_derivation_lambda_wrapped_interpolated_rev() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("mkDerivation.version"),
+        stdout.contains("mk-derivation.version"),
         "stdout: {}",
         stdout
     );
@@ -662,7 +662,7 @@ fn test_fetcher_excluded_from_lambda_wrapped_mk_derivation() {
         stdout
     );
     assert!(
-        stdout.contains("mkDerivation.version"),
+        stdout.contains("mk-derivation.version"),
         "mk-derivation rule should detect version update, got: {}",
         stdout
     );
@@ -705,7 +705,7 @@ fn test_mk_derivation_rec_lambda_dual_interpolation_bare_version() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("mkDerivation.version"),
+        stdout.contains("mk-derivation.version"),
         "should detect version update, stdout: {}",
         stdout
     );
@@ -751,7 +751,7 @@ fn test_mk_derivation_rec_lambda_dual_interpolation_final_attrs_version() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("mkDerivation.version"),
+        stdout.contains("mk-derivation.version"),
         "should detect version update, stdout: {}",
         stdout
     );
@@ -789,7 +789,7 @@ fn test_mk_derivation_rec_and_final_attrs_together() {
     cmd.arg(nix_path.to_str().unwrap());
     cmd.assert()
         .success()
-        .stdout(predicates::str::contains("mkDerivation.version"));
+        .stdout(predicates::str::contains("mk-derivation.version"));
 }
 
 #[test]
@@ -828,7 +828,7 @@ fn test_mk_derivation_rec_and_final_attrs_interpolated_version() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("mkDerivation.version"),
+        stdout.contains("mk-derivation.version"),
         "should detect version update, stdout: {}",
         stdout
     );
@@ -873,7 +873,7 @@ fn test_mk_derivation_rec_and_final_attrs_interpolated_final_attrs_version() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("mkDerivation.version"),
+        stdout.contains("mk-derivation.version"),
         "should detect version update, stdout: {}",
         stdout
     );
@@ -919,7 +919,7 @@ fn test_mk_derivation_pname_bare_ident_in_url() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("mkDerivation.version"),
+        stdout.contains("mk-derivation.version"),
         "should detect version update, stdout: {}",
         stdout
     );
@@ -965,7 +965,7 @@ fn test_mk_derivation_pname_interpolation_in_url() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("mkDerivation.version"),
+        stdout.contains("mk-derivation.version"),
         "should detect version update, stdout: {}",
         stdout
     );
@@ -1011,7 +1011,7 @@ fn test_mk_derivation_pname_interpolation_lambda_wrapped() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("mkDerivation.version"),
+        stdout.contains("mk-derivation.version"),
         "should detect version update, stdout: {}",
         stdout
     );
@@ -1057,7 +1057,7 @@ fn test_mk_derivation_multi_var_interpolated_rev() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("mkDerivation.version"),
+        stdout.contains("mk-derivation.version"),
         "should detect version update, stdout: {}",
         stdout
     );
@@ -1099,7 +1099,7 @@ fn test_mk_derivation_no_pname_skips_interpolated_url() {
     // No mkDerivation updates expected because url interpolation
     // is unresolved without rec/lambda self-reference.
     assert!(
-        !stdout.contains("mkDerivation.version"),
+        !stdout.contains("mk-derivation.version"),
         "should not detect update when url interpolation is unresolved, stdout: {}",
         stdout
     );
@@ -1140,7 +1140,7 @@ fn test_mk_derivation_ident_rev_updates_version_and_hash() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("mkDerivation.version"),
+        stdout.contains("mk-derivation.version"),
         "should detect version update, stdout: {}",
         stdout
     );
@@ -1182,7 +1182,7 @@ fn test_mk_derivation_ident_rev_with_existing_hash() {
     cmd.arg(nix_path.to_str().unwrap());
     cmd.assert()
         .success()
-        .stdout(predicates::str::contains("mkDerivation.version"))
+        .stdout(predicates::str::contains("mk-derivation.version"))
         .stdout(predicates::str::contains("fetchgit.sha256"));
 }
 
@@ -1221,7 +1221,7 @@ fn test_mk_derivation_ident_tag_updates_version_and_hash() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("mkDerivation.version"),
+        stdout.contains("mk-derivation.version"),
         "should detect version update, stdout: {}",
         stdout
     );
@@ -1272,7 +1272,7 @@ fn test_mk_derivation_ident_rev_no_update_when_latest() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        !stdout.contains("mkDerivation.version"),
+        !stdout.contains("mk-derivation.version"),
         "should not detect update when already latest, stdout: {}",
         stdout
     );
@@ -1313,7 +1313,7 @@ fn test_mk_derivation_ident_rev_lambda_wrapped_dotted() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("mkDerivation.version"),
+        stdout.contains("mk-derivation.version"),
         "should detect version update with dotted ident, stdout: {}",
         stdout
     );
@@ -1366,7 +1366,7 @@ fn test_mk_derivation_ident_rev_lambda_no_rec_bare_version_unresolved() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        !stdout.contains("mkDerivation.version"),
+        !stdout.contains("mk-derivation.version"),
         "bare ident 'version' should not resolve without rec, stdout: {}",
         stdout
     );

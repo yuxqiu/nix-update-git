@@ -8,7 +8,13 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::Parser;
 use nix_update_git::cli::OutputFormat;
-use nix_update_git::rules::{FetcherRule, FlakeInputRule, MkDerivationRule, RuleRegistry};
+use nix_update_git::rules::{
+    FetcherRule, FlakeInputRule, RuleRegistry, build_dune_package_rule,
+    build_emscripten_package_rule, build_gem_rule, build_go_module_rule,
+    build_haskell_package_rule, build_mix_package_rule, build_npm_package_rule,
+    build_python_package_rule, build_rebar3_release_rule, build_rust_package_rule,
+    mk_derivation_rule,
+};
 use rayon::prelude::*;
 use walkdir::WalkDir;
 
@@ -65,14 +71,44 @@ fn main() -> Result<()> {
     let rules = &cli.rules;
     let rule_enabled = |name: &str| rules.iter().any(|r| r.is_enabled(name));
 
-    if rule_enabled("flake_input") {
+    if rule_enabled("flake") {
         registry.register(FlakeInputRule);
     }
     if rule_enabled("fetcher") {
         registry.register(FetcherRule);
     }
-    if rule_enabled("mk_derivation") {
-        registry.register(MkDerivationRule);
+    if rule_enabled("mk-derivation") {
+        registry.register(mk_derivation_rule());
+    }
+    if rule_enabled("build-rust-package") {
+        registry.register(build_rust_package_rule());
+    }
+    if rule_enabled("build-go-module") {
+        registry.register(build_go_module_rule());
+    }
+    if rule_enabled("build-python-package") {
+        registry.register(build_python_package_rule());
+    }
+    if rule_enabled("build-dune-package") {
+        registry.register(build_dune_package_rule());
+    }
+    if rule_enabled("build-npm-package") {
+        registry.register(build_npm_package_rule());
+    }
+    if rule_enabled("build-mix-package") {
+        registry.register(build_mix_package_rule());
+    }
+    if rule_enabled("build-rebar3-release") {
+        registry.register(build_rebar3_release_rule());
+    }
+    if rule_enabled("build-gem") {
+        registry.register(build_gem_rule());
+    }
+    if rule_enabled("build-haskell-package") {
+        registry.register(build_haskell_package_rule());
+    }
+    if rule_enabled("build-emscripten-package") {
+        registry.register(build_emscripten_package_rule());
     }
 
     let results: Vec<_> = files.par_iter().map(|p| check_file(p, &registry)).collect();
