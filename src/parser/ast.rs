@@ -280,14 +280,13 @@ impl NixNode {
                             return None;
                         }
                         seen_var = true;
-                    } else if let Some(value) = vars.get(expr_trimmed) {
+                    } else {
+                        let value = vars.get(expr_trimmed)?;
                         if seen_var {
                             suffix.push_str(value);
                         } else {
                             prefix.push_str(value);
                         }
-                    } else {
-                        return None;
                     }
                 }
             }
