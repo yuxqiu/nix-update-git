@@ -1,5 +1,6 @@
+use std::fmt;
+
 use crate::parser::{NixNode, TextRange};
-use anyhow::Result;
 
 #[derive(Debug, Clone)]
 pub struct Update {
@@ -46,10 +47,121 @@ impl UpdateGroup {
     }
 }
 
+/// Warnings produced during rule checking.
+///
+/// These represent recoverable failures (network flakiness, missing refs,
+/// invalid directives) that should be reported to the user but do not
+/// abort the check. Every I/O failure inside a rule is caught and
+/// converted into a warning — the rule simply skips that particular
+/// update and continues.
+#[derive(Debug)]
+pub enum CheckWarning {
+    /// Failed to prefetch/compute a hash for a fetcher call.
+    HashPrefetchFailed {
+        url: String,
+        rev: String,
+        source: anyhow::Error,
+    },
+
+    /// A `# follow:` directive could not be resolved due to an I/O error.
+    FollowResolutionFailed {
+        git_url: String,
+        source: anyhow::Error,
+    },
+
+    /// A `# follow:branch` found no matching branch.
+    FollowBranchNotFound { git_url: String, branch: String },
+
+    /// A `# follow:regex` found no matching tags.
+    FollowRegexNoMatch { git_url: String, pattern: String },
+
+    /// A `# follow:semver` found no matching tags.
+    FollowSemverNoMatch {
+        git_url: String,
+        requirement: String,
+    },
+
+    /// A `# follow:` directive has invalid syntax (e.g., bad semver requirement).
+    InvalidFollowDirective {
+        directive: String,
+        source: anyhow::Error,
+    },
+}
+
+impl fmt::Display for CheckWarning {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CheckWarning::HashPrefetchFailed { url, rev, source } => {
+                write!(
+                    f,
+                    "could not prefetch hash for {} @ {}: {:#}",
+                    url, rev, source
+                )
+            }
+            CheckWarning::FollowResolutionFailed { git_url, source } => {
+                write!(f, "could not resolve follow for {}: {:#}", git_url, source)
+            }
+            CheckWarning::FollowBranchNotFound { git_url, branch } => {
+                write!(f, "could not find branch '{}' for {}", branch, git_url)
+            }
+            CheckWarning::FollowRegexNoMatch { git_url, pattern } => {
+                write!(f, "no tags matching regex '{}' for {}", pattern, git_url)
+            }
+            CheckWarning::FollowSemverNoMatch {
+                git_url,
+                requirement,
+            } => {
+                write!(
+                    f,
+                    "no tags matching semver '{}' for {}",
+                    requirement, git_url
+                )
+            }
+            CheckWarning::InvalidFollowDirective { directive, source } => {
+                write!(f, "invalid follow directive '{}': {:#}", directive, source)
+            }
+        }
+    }
+}
+
+/// Result of checking a single node against a rule.
+pub struct CheckResult {
+    pub groups: Vec<UpdateGroup>,
+    pub warnings: Vec<CheckWarning>,
+}
+
+impl CheckResult {
+    pub fn empty() -> Self {
+        Self {
+            groups: Vec::new(),
+            warnings: Vec::new(),
+        }
+    }
+
+    pub fn with_group(group: UpdateGroup) -> Self {
+        Self {
+            groups: vec![group],
+            warnings: Vec::new(),
+        }
+    }
+
+    pub fn with_warnings(warnings: Vec<CheckWarning>) -> Self {
+        Self {
+            groups: Vec::new(),
+            warnings,
+        }
+    }
+
+    pub fn merge(&mut self, other: CheckResult) {
+        self.groups.extend(other.groups);
+        self.warnings.extend(other.warnings);
+    }
+}
+
 pub trait UpdateRule: Send + Sync {
     fn name(&self) -> &str;
     fn matches(&self, node: &NixNode) -> bool;
-    fn check(&self, node: &NixNode) -> Result<Option<Vec<UpdateGroup>>>;
+    fn check(&self, node: &NixNode) -> CheckResult;
 }
 
 pub struct RuleRegistry {
@@ -65,25 +177,31 @@ impl RuleRegistry {
         self.rules.push(Box::new(rule));
     }
 
-    pub fn check_all(&self, root: &NixNode) -> Result<Vec<(String, Vec<UpdateGroup>)>> {
+    pub fn check_all(
+        &self,
+        root: &NixNode,
+    ) -> (Vec<(String, Vec<UpdateGroup>)>, Vec<CheckWarning>) {
         let mut results = Vec::new();
+        let mut all_warnings = Vec::new();
         for node in root.traverse() {
             for rule in &self.rules {
-                if rule.matches(&node)
-                    && let Some(mut groups) = rule.check(&node)?
-                    && !groups.is_empty()
-                {
-                    let rule_name = rule.name().to_string();
-                    for group in &mut groups {
-                        for update in &mut group.updates {
-                            update.rule_name = rule_name.clone();
+                if rule.matches(&node) {
+                    let CheckResult { groups, warnings } = rule.check(&node);
+                    all_warnings.extend(warnings);
+                    if !groups.is_empty() {
+                        let rule_name = rule.name().to_string();
+                        let mut groups = groups;
+                        for group in &mut groups {
+                            for update in &mut group.updates {
+                                update.rule_name = rule_name.clone();
+                            }
                         }
+                        results.push((rule_name, groups));
                     }
-                    results.push((rule_name, groups));
                 }
             }
         }
-        Ok(results)
+        (results, all_warnings)
     }
 }
 

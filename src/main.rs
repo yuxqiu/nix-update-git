@@ -19,7 +19,7 @@ use rayon::prelude::*;
 use walkdir::WalkDir;
 
 use check::check_file;
-use output::{UpdateEntry, print_json, print_updates, select_interactive};
+use output::{UpdateEntry, print_json, print_updates, print_warnings, select_interactive};
 use patch::apply_updates;
 
 fn expand_inputs(inputs: Vec<PathBuf>) -> Vec<PathBuf> {
@@ -125,6 +125,10 @@ fn main() -> Result<()> {
                 continue;
             }
         };
+
+        if !fr.warnings.is_empty() {
+            print_warnings(&fr.warnings);
+        }
 
         if fr.updates_per_rule.is_empty() {
             if cli.verbose && cli.format == OutputFormat::Text {

@@ -7,7 +7,7 @@ use crate::rules::fetcher::{
     InterpolationSpec, git_fetch, is_commit_hash, kind::FetcherKind, kind::HashStrategy,
     parse_fetcher_attrset, preferred_ref_key, resolve_ref_for_prefetch, tarball,
 };
-use crate::rules::traits::{Update, UpdateGroup, UpdateRule};
+use crate::rules::traits::{CheckResult, CheckWarning, Update, UpdateGroup, UpdateRule};
 use crate::utils::{GitFetcher, NarHash, VersionDetector};
 
 struct DerivationCall {
@@ -283,20 +283,18 @@ impl DerivationRule {
         Some(middle.to_string())
     }
 
-    fn check_derivation_call(
-        rule_name: &str,
-        call: &DerivationCall,
-    ) -> Result<Option<UpdateGroup>> {
+    fn check_derivation_call(rule_name: &str, call: &DerivationCall) -> CheckResult {
         if call.pinned {
-            return Ok(None);
+            return CheckResult::empty();
         }
 
         let git_url = match call.fetcher_kind.git_url(&call.fetcher_parsed) {
             Some(url) => url,
-            None => return Ok(None),
+            None => return CheckResult::empty(),
         };
 
         let mut updates = Vec::new();
+        let mut warnings: Vec<CheckWarning> = Vec::new();
         let mut effective_ref_changed = false;
         let mut target_version = call.version_value.clone();
         let mut new_source_ref_text: Option<String> = None;
@@ -307,36 +305,66 @@ impl DerivationRule {
                     && VersionDetector::is_version(current_ref)
                     && current_ref == &call.version_value
                 {
-                    if let Some(latest) =
-                        GitFetcher::get_latest_tag_matching(&git_url, Some(current_ref))?
-                        && VersionDetector::compare(current_ref, &latest)
-                            == std::cmp::Ordering::Less
+                    match GitFetcher::get_latest_tag_matching(&git_url, Some(current_ref)) {
+                        Ok(Some(latest))
+                            if VersionDetector::compare(current_ref, &latest)
+                                == std::cmp::Ordering::Less =>
+                        {
+                            target_version = latest.clone();
+                            new_source_ref_text = Some(latest);
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            warnings.push(CheckWarning::FollowResolutionFailed {
+                                git_url: git_url.clone(),
+                                source: e,
+                            });
+                            return CheckResult::with_warnings(warnings);
+                        }
+                    }
+                } else if is_commit_hash(current_ref) {
+                    match GitFetcher::get_latest_tag_matching(&git_url, Some(&call.version_value)) {
+                        Ok(Some(latest))
+                            if VersionDetector::compare(&call.version_value, &latest)
+                                == std::cmp::Ordering::Less =>
+                        {
+                            target_version = latest.clone();
+                            new_source_ref_text = GitFetcher::resolve_ref_to_sha(&git_url, &latest)
+                                .ok()
+                                .flatten();
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            warnings.push(CheckWarning::FollowResolutionFailed {
+                                git_url: git_url.clone(),
+                                source: e,
+                            });
+                            return CheckResult::with_warnings(warnings);
+                        }
+                    }
+                }
+            }
+            SourceRefValue::Pure(current_ref) => {
+                match GitFetcher::get_latest_tag_matching(&git_url, Some(&call.version_value)) {
+                    Ok(Some(latest))
+                        if VersionDetector::compare(&call.version_value, &latest)
+                            == std::cmp::Ordering::Less =>
                     {
                         target_version = latest.clone();
                         new_source_ref_text = Some(latest);
                     }
-                } else if is_commit_hash(current_ref)
-                    && let Some(latest) =
-                        GitFetcher::get_latest_tag_matching(&git_url, Some(&call.version_value))?
-                    && VersionDetector::compare(&call.version_value, &latest)
-                        == std::cmp::Ordering::Less
-                {
-                    target_version = latest.clone();
-                    new_source_ref_text = GitFetcher::resolve_ref_to_sha(&git_url, &latest)
-                        .ok()
-                        .flatten();
-                }
-            }
-            SourceRefValue::Pure(current_ref) => {
-                if let Some(latest) =
-                    GitFetcher::get_latest_tag_matching(&git_url, Some(&call.version_value))?
-                    && VersionDetector::compare(&call.version_value, &latest)
-                        == std::cmp::Ordering::Less
-                {
-                    target_version = latest.clone();
-                    new_source_ref_text = Some(latest);
-                } else if current_ref.is_empty() {
-                    new_source_ref_text = Some(call.version_value.clone());
+                    Ok(_) => {
+                        if current_ref.is_empty() {
+                            new_source_ref_text = Some(call.version_value.clone());
+                        }
+                    }
+                    Err(e) => {
+                        warnings.push(CheckWarning::FollowResolutionFailed {
+                            git_url: git_url.clone(),
+                            source: e,
+                        });
+                        return CheckResult::with_warnings(warnings);
+                    }
                 }
             }
             SourceRefValue::InterpolatedFromVersion {
@@ -345,33 +373,55 @@ impl DerivationRule {
             } => {
                 let mut vars = call.extra_vars.clone();
                 vars.insert(version_var.clone(), call.version_value.clone());
-                if let Some(resolved_ref) = template_node.interpolated_string_content(&vars)
-                    && let Some(latest_ref) =
-                        GitFetcher::get_latest_tag_matching(&git_url, Some(&resolved_ref))?
-                    && VersionDetector::compare(&resolved_ref, &latest_ref)
-                        == std::cmp::Ordering::Less
-                    && let Some(candidate_version) = Self::extract_version_from_interpolated_ref(
-                        template_node,
-                        &latest_ref,
-                        version_var,
-                        &call.extra_vars,
-                    )
-                    && VersionDetector::is_version(&candidate_version)
-                    && VersionDetector::compare(&call.version_value, &candidate_version)
-                        == std::cmp::Ordering::Less
-                {
-                    target_version = candidate_version;
-                    effective_ref_changed = true;
+                if let Some(resolved_ref) = template_node.interpolated_string_content(&vars) {
+                    match GitFetcher::get_latest_tag_matching(&git_url, Some(&resolved_ref)) {
+                        Ok(Some(latest_ref))
+                            if VersionDetector::compare(&resolved_ref, &latest_ref)
+                                == std::cmp::Ordering::Less =>
+                        {
+                            if let Some(candidate_version) =
+                                Self::extract_version_from_interpolated_ref(
+                                    template_node,
+                                    &latest_ref,
+                                    version_var,
+                                    &call.extra_vars,
+                                )
+                                && VersionDetector::is_version(&candidate_version)
+                                && VersionDetector::compare(&call.version_value, &candidate_version)
+                                    == std::cmp::Ordering::Less
+                            {
+                                target_version = candidate_version;
+                                effective_ref_changed = true;
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            warnings.push(CheckWarning::FollowResolutionFailed {
+                                git_url: git_url.clone(),
+                                source: e,
+                            });
+                            return CheckResult::with_warnings(warnings);
+                        }
+                    }
                 }
             }
             SourceRefValue::IdentFromVersion => {
-                if let Some(latest) =
-                    GitFetcher::get_latest_tag_matching(&git_url, Some(&call.version_value))?
-                    && VersionDetector::compare(&call.version_value, &latest)
-                        == std::cmp::Ordering::Less
-                {
-                    target_version = latest;
-                    effective_ref_changed = true;
+                match GitFetcher::get_latest_tag_matching(&git_url, Some(&call.version_value)) {
+                    Ok(Some(latest))
+                        if VersionDetector::compare(&call.version_value, &latest)
+                            == std::cmp::Ordering::Less =>
+                    {
+                        target_version = latest;
+                        effective_ref_changed = true;
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        warnings.push(CheckWarning::FollowResolutionFailed {
+                            git_url: git_url.clone(),
+                            source: e,
+                        });
+                        return CheckResult::with_warnings(warnings);
+                    }
                 }
             }
             SourceRefValue::Missing => {}
@@ -461,26 +511,38 @@ impl DerivationRule {
                         }
                     }
                     Err(e) => {
-                        eprintln!(
-                            "Warning: could not prefetch hash for {} @ {}: {}",
-                            git_url, rev_for_hash, e
-                        );
+                        warnings.push(CheckWarning::HashPrefetchFailed {
+                            url: git_url.clone(),
+                            rev: rev_for_hash.clone(),
+                            source: e,
+                        });
                         hash_failed = true;
                     }
                 }
             } else {
+                warnings.push(CheckWarning::HashPrefetchFailed {
+                    url: git_url.clone(),
+                    rev: String::new(),
+                    source: anyhow::anyhow!("could not resolve ref for hash computation"),
+                });
                 hash_failed = true;
             }
         }
 
         if hash_failed {
-            return Ok(None);
+            return CheckResult::with_warnings(warnings);
         }
 
         if updates.is_empty() {
-            Ok(None)
+            CheckResult {
+                groups: vec![],
+                warnings,
+            }
         } else {
-            Ok(Some(UpdateGroup::new(updates)))
+            CheckResult {
+                groups: vec![UpdateGroup::new(updates)],
+                warnings,
+            }
         }
     }
 }
@@ -494,24 +556,25 @@ impl UpdateRule for DerivationRule {
         node.kind() == rnix::SyntaxKind::NODE_APPLY
     }
 
-    fn check(&self, node: &NixNode) -> Result<Option<Vec<UpdateGroup>>> {
+    fn check(&self, node: &NixNode) -> CheckResult {
         let call = match self.try_extract_call(node) {
             Some(call) => call,
-            None => return Ok(None),
+            None => return CheckResult::empty(),
         };
 
         let target = call.fetcher_kind.display_target(&call.fetcher_parsed);
 
-        let mut group = match Self::check_derivation_call(&self.rule_name, &call)? {
-            Some(group) => group,
-            None => return Ok(None),
-        };
+        let mut result = Self::check_derivation_call(&self.rule_name, &call);
 
-        for update in group.updates.iter_mut() {
-            update.target = target.clone();
+        if !result.groups.is_empty() {
+            for group in result.groups.iter_mut() {
+                for update in group.updates.iter_mut() {
+                    update.target = target.clone();
+                }
+            }
         }
 
-        Ok(Some(vec![group]))
+        result
     }
 }
 

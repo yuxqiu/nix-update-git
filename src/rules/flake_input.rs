@@ -1,7 +1,6 @@
 use crate::parser::{AttrSpec, AttrType, NixNode, TextRange};
-use crate::rules::traits::{Update, UpdateGroup, UpdateRule};
+use crate::rules::traits::{CheckResult, Update, UpdateGroup, UpdateRule};
 use crate::utils::{GitFetcher, VersionDetector};
-use anyhow::Result;
 use std::collections::HashMap;
 
 const FLAKE_INPUT_ATTR_SPEC: &[AttrSpec] = &[
@@ -484,12 +483,12 @@ impl UpdateRule for FlakeInputRule {
         node.kind() == rnix::SyntaxKind::NODE_ROOT
     }
 
-    fn check(&self, node: &NixNode) -> Result<Option<Vec<UpdateGroup>>> {
+    fn check(&self, node: &NixNode) -> CheckResult {
         let mut groups = Vec::new();
 
         let root_attrs = match Self::find_root_attr_set(node) {
             Some(attrs) => attrs,
-            None => return Ok(None),
+            None => return CheckResult::empty(),
         };
 
         let input_defs = Self::collect_inputs_from_root(&root_attrs);
@@ -558,9 +557,12 @@ impl UpdateRule for FlakeInputRule {
         }
 
         if groups.is_empty() {
-            Ok(None)
+            CheckResult::empty()
         } else {
-            Ok(Some(groups))
+            CheckResult {
+                groups,
+                warnings: vec![],
+            }
         }
     }
 }

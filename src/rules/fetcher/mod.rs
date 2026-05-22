@@ -1,10 +1,8 @@
 use std::collections::HashMap;
 
-use anyhow::Result;
-
 use crate::parser::{NixNode, ParsedAttrs};
 use crate::rules::derivation::OWNED_FUNC_NAMES;
-use crate::rules::traits::{Update, UpdateGroup, UpdateRule};
+use crate::rules::traits::{CheckResult, CheckWarning, Update, UpdateGroup, UpdateRule};
 use crate::utils::{GitFetcher, NarHash, VersionDetector};
 
 use kind::{FetcherKind, HashStrategy};
@@ -20,37 +18,49 @@ enum FollowSpec {
     Semver(semver::VersionReq),
 }
 
-fn parse_follow_spec(s: &str) -> Option<FollowSpec> {
-    let (kind, rest) = s.split_once(' ')?;
-    let rest = rest.trim();
+fn parse_follow_spec(s: &str) -> (Option<FollowSpec>, Vec<CheckWarning>) {
+    let (kind, rest) = match s.split_once(' ') {
+        Some((k, r)) => (k, r.trim()),
+        None => return (None, vec![]),
+    };
     match kind {
         "branch" => {
             if rest.is_empty() {
-                return None;
+                return (None, vec![]);
             }
-            Some(FollowSpec::Branch(rest.to_string()))
+            (Some(FollowSpec::Branch(rest.to_string())), vec![])
         }
         "regex" => {
             if rest.is_empty() {
-                return None;
+                return (None, vec![]);
             }
-            regex::Regex::new(&format!("^(?:{})$", rest))
-                .ok()
-                .map(FollowSpec::Regex)
+            match regex::Regex::new(&format!("^(?:{})$", rest)) {
+                Ok(re) => (Some(FollowSpec::Regex(re)), vec![]),
+                Err(e) => (
+                    None,
+                    vec![CheckWarning::InvalidFollowDirective {
+                        directive: s.to_string(),
+                        source: anyhow::anyhow!("invalid regex '{}': {:#}", rest, e),
+                    }],
+                ),
+            }
         }
         "semver" => {
             if rest.is_empty() {
-                return None;
+                return (None, vec![]);
             }
             match semver::VersionReq::parse(rest) {
-                Ok(req) => Some(FollowSpec::Semver(req)),
-                Err(e) => {
-                    eprintln!("Warning: invalid semver requirement '{}': {:#}", rest, e);
-                    None
-                }
+                Ok(req) => (Some(FollowSpec::Semver(req)), vec![]),
+                Err(e) => (
+                    None,
+                    vec![CheckWarning::InvalidFollowDirective {
+                        directive: s.to_string(),
+                        source: anyhow::anyhow!("invalid semver requirement '{}': {:#}", rest, e),
+                    }],
+                ),
             }
         }
-        _ => None,
+        _ => (None, vec![]),
     }
 }
 
@@ -58,44 +68,79 @@ struct FollowResult {
     sha: String,
 }
 
-fn resolve_follow(spec: &FollowSpec, git_url: &str) -> Result<Option<FollowResult>> {
+fn resolve_follow(spec: &FollowSpec, git_url: &str) -> (Option<FollowResult>, Vec<CheckWarning>) {
     match spec {
         FollowSpec::Branch(branch) => {
-            let sha = match GitFetcher::get_latest_commit(git_url, branch)? {
-                Some(sha) => sha,
-                None => {
-                    eprintln!(
-                        "Warning: could not find branch '{}' for {}",
-                        branch, git_url
+            let sha = match GitFetcher::get_latest_commit(git_url, branch) {
+                Ok(Some(sha)) => sha,
+                Ok(None) => {
+                    return (
+                        None,
+                        vec![CheckWarning::FollowBranchNotFound {
+                            git_url: git_url.to_string(),
+                            branch: branch.to_string(),
+                        }],
                     );
-                    return Ok(None);
+                }
+                Err(e) => {
+                    return (
+                        None,
+                        vec![CheckWarning::FollowResolutionFailed {
+                            git_url: git_url.to_string(),
+                            source: e,
+                        }],
+                    );
                 }
             };
-            Ok(Some(FollowResult { sha }))
+            (Some(FollowResult { sha }), vec![])
         }
         FollowSpec::Regex(pattern) => {
-            let tags = GitFetcher::list_tags(git_url)?;
+            let tags = match GitFetcher::list_tags(git_url) {
+                Ok(tags) => tags,
+                Err(e) => {
+                    return (
+                        None,
+                        vec![CheckWarning::FollowResolutionFailed {
+                            git_url: git_url.to_string(),
+                            source: e,
+                        }],
+                    );
+                }
+            };
             let matched: Vec<_> = tags
                 .iter()
                 .filter(|(name, _)| pattern.is_match(name))
                 .collect();
             if matched.is_empty() {
-                eprintln!(
-                    "Warning: no tags matching regex '{}' for {}",
-                    pattern, git_url
+                return (
+                    None,
+                    vec![CheckWarning::FollowRegexNoMatch {
+                        git_url: git_url.to_string(),
+                        pattern: pattern.to_string(),
+                    }],
                 );
-                return Ok(None);
             }
             let best = matched
                 .into_iter()
                 .max_by(|(a, _), (b, _)| VersionDetector::compare(a, b));
             match best {
-                Some((_, sha)) => Ok(Some(FollowResult { sha: sha.clone() })),
-                None => Ok(None),
+                Some((_, sha)) => (Some(FollowResult { sha: sha.clone() }), vec![]),
+                None => (None, vec![]),
             }
         }
         FollowSpec::Semver(requirement) => {
-            let tags = GitFetcher::list_tags(git_url)?;
+            let tags = match GitFetcher::list_tags(git_url) {
+                Ok(tags) => tags,
+                Err(e) => {
+                    return (
+                        None,
+                        vec![CheckWarning::FollowResolutionFailed {
+                            git_url: git_url.to_string(),
+                            source: e,
+                        }],
+                    );
+                }
+            };
             let matched: Vec<_> = tags
                 .iter()
                 .filter(|(name, _)| {
@@ -105,11 +150,13 @@ fn resolve_follow(spec: &FollowSpec, git_url: &str) -> Result<Option<FollowResul
                 })
                 .collect();
             if matched.is_empty() {
-                eprintln!(
-                    "Warning: no tags matching semver '{}' for {}",
-                    requirement, git_url
+                return (
+                    None,
+                    vec![CheckWarning::FollowSemverNoMatch {
+                        git_url: git_url.to_string(),
+                        requirement: requirement.to_string(),
+                    }],
                 );
-                return Ok(None);
             }
             let best = matched.into_iter().max_by(|(a, _), (b, _)| {
                 let va =
@@ -124,8 +171,8 @@ fn resolve_follow(spec: &FollowSpec, git_url: &str) -> Result<Option<FollowResul
                 }
             });
             match best {
-                Some((_, sha)) => Ok(Some(FollowResult { sha: sha.clone() })),
-                None => Ok(None),
+                Some((_, sha)) => (Some(FollowResult { sha: sha.clone() }), vec![]),
+                None => (None, vec![]),
             }
         }
     }
@@ -229,7 +276,7 @@ pub(crate) fn parse_fetcher_attrset(
     kind: FetcherKind,
     attr_set: &NixNode,
     spec: &InterpolationSpec,
-) -> Result<FetcherAttrs, anyhow::Error> {
+) -> anyhow::Result<FetcherAttrs> {
     let ident_vars_opt = if spec.ident_vars.is_empty() {
         None
     } else {
@@ -305,82 +352,120 @@ impl FetcherRule {
         })
     }
 
-    fn check_fetcher_call(&self, call: &FetcherCall) -> Result<Option<UpdateGroup>> {
+    fn check_fetcher_call(&self, call: &FetcherCall) -> CheckResult {
         let git_url = match call.kind.git_url(&call.parsed) {
             Some(url) => url,
-            None => return Ok(None),
+            None => return CheckResult::empty(),
         };
 
         let mut updates = Vec::new();
+        let mut warnings = Vec::new();
         let mut version_updated_rev: Option<String> = None;
-
+        let mut hash_failed = false;
         if !call.pinned {
             if let Some(follow_str) = &call.follow {
-                if let Some(spec) = parse_follow_spec(follow_str) {
-                    version_updated_rev =
-                        self.handle_following(call, &git_url, &spec, &mut updates)?;
-                } else {
-                    eprintln!("Warning: invalid follow directive: '{}'", follow_str);
+                let (spec, ws) = parse_follow_spec(follow_str);
+                warnings.extend(ws);
+                if let Some(spec) = spec {
+                    let (new_sha, ws) = self.handle_following(call, &git_url, &spec);
+                    warnings.extend(ws);
+                    if let Some(sha) = &new_sha {
+                        let ref_key = if call.parsed.strings.contains_key("rev") {
+                            "rev"
+                        } else if call.kind == FetcherKind::BuiltinsFetchGit {
+                            "ref"
+                        } else {
+                            "rev"
+                        };
+                        if let Some(range) = call.parsed.string_range(ref_key) {
+                            updates.push(Update::new(
+                                format!("{}.rev", call.kind.name()),
+                                format!("\"{}\"", sha),
+                                range,
+                            ));
+                        }
+                    }
+                    version_updated_rev = new_sha;
                 }
             } else {
-                version_updated_rev = self.handle_version_update(call, &git_url, &mut updates)?;
+                let (new_version, ws) = self.handle_version_update(call, &git_url);
+                warnings.extend(ws);
+                if let Some(version) = &new_version
+                    && let Some((version_key, _)) =
+                        version_ref_key_and_value(call.kind, &call.parsed)
+                    && let Some(range) = call.parsed.string_range(version_key)
+                {
+                    updates.push(Update::new(
+                        format!("{}.{}", call.kind.name(), version_key),
+                        format!("\"{}\"", version),
+                        range,
+                    ));
+                }
+                version_updated_rev = new_version;
             }
         }
 
         let needs_hash = call.kind.needs_hash();
         if needs_hash {
-            let hash_ok = if let Some(rev) = &version_updated_rev {
+            let (ok, ws) = if let Some(rev) = &version_updated_rev {
                 Self::try_prefetch_hash(call, rev, &mut updates)
             } else {
                 Self::try_prefetch_empty_hash(call, &git_url, &mut updates)
             };
-            if !hash_ok {
-                return Ok(None);
+            warnings.extend(ws);
+            if !ok {
+                hash_failed = true;
             }
         }
 
-        if updates.is_empty() {
-            Ok(None)
+        if hash_failed {
+            CheckResult::with_warnings(warnings)
+        } else if updates.is_empty() {
+            CheckResult {
+                groups: vec![],
+                warnings,
+            }
         } else {
-            Ok(Some(UpdateGroup::new(updates)))
+            CheckResult {
+                groups: vec![UpdateGroup::new(updates)],
+                warnings,
+            }
         }
     }
 
-    fn check_fetchpatch_call(call: &FetcherCall) -> Result<Option<UpdateGroup>> {
+    fn check_fetchpatch_call(call: &FetcherCall) -> CheckResult {
         let url = match call.parsed.strings.get("url") {
             Some(url) => url.clone(),
             None => match call.parsed.pure_string_list("urls") {
                 Some(urls) if !urls.is_empty() => urls[0].clone(),
-                _ => return Ok(None),
+                _ => return CheckResult::empty(),
             },
         };
 
         let mut updates = Vec::new();
+        let mut warnings = Vec::new();
         let mut current_url = url.clone();
         let mut url_changed = false;
+        let mut hash_failed = false;
 
         let parsed_url = source_url::parse_patch_url(&url);
 
         if let Some(follow_str) = &call.follow {
-            if let Some(spec) = parse_follow_spec(follow_str) {
-                if let Some(parsed) = &parsed_url {
-                    let git_url = parsed.git_remote_url();
-                    match resolve_follow(&spec, &git_url) {
-                        Ok(Some(result)) => {
-                            let current_ref = parsed.current_ref();
-                            if current_ref != result.sha {
-                                current_url = parsed.replace_ref(&result.sha);
-                                url_changed = true;
-                            }
-                        }
-                        Ok(None) => {}
-                        Err(e) => {
-                            eprintln!("Warning: could not resolve follow for {}: {:#}", git_url, e);
-                        }
+            let (spec, ws) = parse_follow_spec(follow_str);
+            warnings.extend(ws);
+            if let Some(spec) = spec
+                && let Some(parsed) = &parsed_url
+            {
+                let git_url = parsed.git_remote_url();
+                let (result, ws) = resolve_follow(&spec, &git_url);
+                warnings.extend(ws);
+                if let Some(result) = result {
+                    let current_ref = parsed.current_ref();
+                    if current_ref != result.sha {
+                        current_url = parsed.replace_ref(&result.sha);
+                        url_changed = true;
                     }
                 }
-            } else {
-                eprintln!("Warning: invalid follow directive: '{}'", follow_str);
             }
         } else if !call.pinned
             && let Some(parsed) = &parsed_url
@@ -388,11 +473,20 @@ impl FetcherRule {
         {
             let git_url = parsed.git_remote_url();
             let current = parsed.current_ref();
-            if let Ok(Some(latest)) = GitFetcher::get_latest_tag_matching(&git_url, Some(current))
-                && VersionDetector::compare(current, &latest) == std::cmp::Ordering::Less
-            {
-                current_url = parsed.replace_ref(&latest);
-                url_changed = true;
+            match GitFetcher::get_latest_tag_matching(&git_url, Some(current)) {
+                Ok(Some(latest))
+                    if VersionDetector::compare(current, &latest) == std::cmp::Ordering::Less =>
+                {
+                    current_url = parsed.replace_ref(&latest);
+                    url_changed = true;
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    warnings.push(CheckWarning::FollowResolutionFailed {
+                        git_url: git_url.clone(),
+                        source: e,
+                    });
+                }
             }
         }
 
@@ -492,7 +586,6 @@ impl FetcherRule {
             && !has_non_sha256_hash_algo
             && can_decode;
 
-        let mut hash_ok = true;
         if needs_hash {
             let has_hash_source = call.parsed.has_string("hash")
                 || call.parsed.has_string("sha256")
@@ -539,62 +632,65 @@ impl FetcherRule {
                         }
                     }
                     Err(e) => {
-                        eprintln!(
-                            "Warning: could not prefetch hash for fetchpatch {}: {:#}",
-                            current_url, e
-                        );
-                        hash_ok = false;
+                        warnings.push(CheckWarning::HashPrefetchFailed {
+                            url: current_url.clone(),
+                            rev: String::new(),
+                            source: e,
+                        });
+                        hash_failed = true;
                     }
                 }
             }
         }
 
-        if needs_hash && !hash_ok {
-            return Ok(None);
-        }
-
-        if updates.is_empty() {
-            Ok(None)
+        if hash_failed {
+            CheckResult::with_warnings(warnings)
+        } else if updates.is_empty() {
+            CheckResult {
+                groups: vec![],
+                warnings,
+            }
         } else {
-            Ok(Some(UpdateGroup::new(updates)))
+            CheckResult {
+                groups: vec![UpdateGroup::new(updates)],
+                warnings,
+            }
         }
     }
 
-    fn check_fetchtarball_call(call: &FetcherCall) -> Result<Option<UpdateGroup>> {
+    fn check_fetchtarball_call(call: &FetcherCall) -> CheckResult {
         let url = match call.parsed.strings.get("url") {
             Some(url) => url.clone(),
             None => match call.parsed.pure_string_list("urls") {
                 Some(urls) if !urls.is_empty() => urls[0].clone(),
-                _ => return Ok(None),
+                _ => return CheckResult::empty(),
             },
         };
 
         let mut updates = Vec::new();
+        let mut warnings = Vec::new();
         let mut current_url = url.clone();
         let mut url_changed = false;
+        let mut hash_failed = false;
 
         let parsed_url = source_url::parse_source_url(&url);
 
         if let Some(follow_str) = &call.follow {
-            if let Some(spec) = parse_follow_spec(follow_str) {
-                if let Some(parsed) = &parsed_url {
-                    let git_url = parsed.git_remote_url();
-                    match resolve_follow(&spec, &git_url) {
-                        Ok(Some(result)) => {
-                            let current_ref = parsed.current_ref();
-                            if current_ref != result.sha {
-                                current_url = parsed.replace_ref(&result.sha);
-                                url_changed = true;
-                            }
-                        }
-                        Ok(None) => {}
-                        Err(e) => {
-                            eprintln!("Warning: could not resolve follow for {}: {:#}", git_url, e);
-                        }
+            let (spec, ws) = parse_follow_spec(follow_str);
+            warnings.extend(ws);
+            if let Some(spec) = spec
+                && let Some(parsed) = &parsed_url
+            {
+                let git_url = parsed.git_remote_url();
+                let (result, ws) = resolve_follow(&spec, &git_url);
+                warnings.extend(ws);
+                if let Some(result) = result {
+                    let current_ref = parsed.current_ref();
+                    if current_ref != result.sha {
+                        current_url = parsed.replace_ref(&result.sha);
+                        url_changed = true;
                     }
                 }
-            } else {
-                eprintln!("Warning: invalid follow directive: '{}'", follow_str);
             }
         } else if !call.pinned
             && let Some(parsed) = &parsed_url
@@ -602,11 +698,20 @@ impl FetcherRule {
         {
             let git_url = parsed.git_remote_url();
             let current = parsed.current_ref();
-            if let Ok(Some(latest)) = GitFetcher::get_latest_tag_matching(&git_url, Some(current))
-                && VersionDetector::compare(current, &latest) == std::cmp::Ordering::Less
-            {
-                current_url = parsed.replace_ref(&latest);
-                url_changed = true;
+            match GitFetcher::get_latest_tag_matching(&git_url, Some(current)) {
+                Ok(Some(latest))
+                    if VersionDetector::compare(current, &latest) == std::cmp::Ordering::Less =>
+                {
+                    current_url = parsed.replace_ref(&latest);
+                    url_changed = true;
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    warnings.push(CheckWarning::FollowResolutionFailed {
+                        git_url: git_url.clone(),
+                        source: e,
+                    });
+                }
             }
         }
 
@@ -631,7 +736,6 @@ impl FetcherRule {
                 .is_some_and(|h| h.is_empty()))
             && call.kind.needs_hash();
 
-        let mut hash_ok = true;
         if needs_hash {
             let has_hash_source =
                 call.parsed.has_string("hash") || call.parsed.has_string("sha256");
@@ -656,24 +760,29 @@ impl FetcherRule {
                         }
                     }
                     Err(e) => {
-                        eprintln!(
-                            "Warning: could not prefetch hash for fetchTarball {}: {:#}",
-                            current_url, e
-                        );
-                        hash_ok = false;
+                        warnings.push(CheckWarning::HashPrefetchFailed {
+                            url: current_url.clone(),
+                            rev: String::new(),
+                            source: e,
+                        });
+                        hash_failed = true;
                     }
                 }
             }
         }
 
-        if needs_hash && !hash_ok {
-            return Ok(None);
-        }
-
-        if updates.is_empty() {
-            Ok(None)
+        if hash_failed {
+            CheckResult::with_warnings(warnings)
+        } else if updates.is_empty() {
+            CheckResult {
+                groups: vec![],
+                warnings,
+            }
         } else {
-            Ok(Some(UpdateGroup::new(updates)))
+            CheckResult {
+                groups: vec![UpdateGroup::new(updates)],
+                warnings,
+            }
         }
     }
 
@@ -682,11 +791,10 @@ impl FetcherRule {
         call: &FetcherCall,
         git_url: &str,
         spec: &FollowSpec,
-        updates: &mut Vec<Update>,
-    ) -> Result<Option<String>> {
-        let result = match resolve_follow(spec, git_url)? {
-            Some(r) => r,
-            None => return Ok(None),
+    ) -> (Option<String>, Vec<CheckWarning>) {
+        let (result, ws) = resolve_follow(spec, git_url);
+        let Some(result) = result else {
+            return (None, ws);
         };
 
         let new_sha = result.sha;
@@ -700,7 +808,7 @@ impl FetcherRule {
         if let Some(current) = current_ref
             && current == &new_sha
         {
-            return Ok(None);
+            return (None, ws);
         }
 
         let ref_key = if call.parsed.strings.contains_key("rev") {
@@ -711,51 +819,42 @@ impl FetcherRule {
             "rev"
         };
 
-        if let Some(range) = call.parsed.string_range(ref_key) {
-            updates.push(Update::new(
-                format!("{}.rev", call.kind.name()),
-                format!("\"{}\"", new_sha),
-                range,
-            ));
-
-            Ok(Some(new_sha))
+        if call.parsed.string_range(ref_key).is_some() {
+            (Some(new_sha.clone()), ws)
         } else {
-            Ok(None)
+            (None, ws)
         }
     }
-
     fn handle_version_update(
         &self,
         call: &FetcherCall,
         git_url: &str,
-        updates: &mut Vec<Update>,
-    ) -> Result<Option<String>> {
-        let Some((version_key, current_version)) =
+    ) -> (Option<String>, Vec<CheckWarning>) {
+        let Some((_version_key, current_version)) =
             version_ref_key_and_value(call.kind, &call.parsed)
         else {
-            return Ok(None);
+            return (None, vec![]);
         };
 
-        let latest = match GitFetcher::get_latest_tag_matching(git_url, Some(&current_version))? {
-            Some(tag) => tag,
-            None => return Ok(None),
+        let latest = match GitFetcher::get_latest_tag_matching(git_url, Some(&current_version)) {
+            Ok(Some(tag)) => tag,
+            Ok(None) => return (None, vec![]),
+            Err(e) => {
+                return (
+                    None,
+                    vec![CheckWarning::FollowResolutionFailed {
+                        git_url: git_url.to_string(),
+                        source: e,
+                    }],
+                );
+            }
         };
 
         if VersionDetector::compare(&current_version, &latest) != std::cmp::Ordering::Less {
-            return Ok(None);
+            return (None, vec![]);
         }
 
-        if let Some(range) = call.parsed.string_range(version_key) {
-            updates.push(Update::new(
-                format!("{}.{}", call.kind.name(), version_key),
-                format!("\"{}\"", latest),
-                range,
-            ));
-
-            Ok(Some(latest))
-        } else {
-            Ok(None)
-        }
+        (Some(latest), vec![])
     }
 
     fn resolve_rev(call: &FetcherCall, git_url: &str) -> Option<String> {
@@ -763,11 +862,14 @@ impl FetcherRule {
         let ref_value = call.parsed.strings.get(key)?;
         resolve_ref_for_prefetch(git_url, ref_value)
     }
-
-    fn try_prefetch_hash(call: &FetcherCall, rev: &str, updates: &mut Vec<Update>) -> bool {
+    fn try_prefetch_hash(
+        call: &FetcherCall,
+        rev: &str,
+        updates: &mut Vec<Update>,
+    ) -> (bool, Vec<CheckWarning>) {
         if !call.parsed.has_string("hash") && !call.parsed.has_string("sha256") {
             // No hash field to update — not a failure, just nothing to do.
-            return true;
+            return (true, vec![]);
         }
 
         let result = Self::compute_hash(call, rev);
@@ -788,15 +890,18 @@ impl FetcherRule {
                         range,
                     ));
                 }
-                true
+                (true, vec![])
             }
             Err(e) => {
                 let git_url = call.kind.git_url(&call.parsed).unwrap_or_default();
-                eprintln!(
-                    "Warning: could not prefetch hash for {} @ {}: {:#}",
-                    git_url, rev, e
-                );
-                false
+                (
+                    false,
+                    vec![CheckWarning::HashPrefetchFailed {
+                        url: git_url,
+                        rev: rev.to_string(),
+                        source: e,
+                    }],
+                )
             }
         }
     }
@@ -805,7 +910,7 @@ impl FetcherRule {
         call: &FetcherCall,
         git_url: &str,
         updates: &mut Vec<Update>,
-    ) -> bool {
+    ) -> (bool, Vec<CheckWarning>) {
         let has_empty_hash = call
             .parsed
             .strings
@@ -818,17 +923,17 @@ impl FetcherRule {
                 .is_some_and(|h| h.is_empty());
 
         if !has_empty_hash {
-            return false;
+            return (true, vec![]);
         }
 
         if let Some(rev) = Self::resolve_rev(call, git_url) {
             Self::try_prefetch_hash(call, &rev, updates)
         } else {
-            false
+            (true, vec![])
         }
     }
 
-    fn compute_hash(call: &FetcherCall, rev: &str) -> Result<NarHash> {
+    fn compute_hash(call: &FetcherCall, rev: &str) -> anyhow::Result<NarHash> {
         let has_sparse_checkout = call
             .parsed
             .pure_string_list("sparseCheckout")
@@ -845,7 +950,9 @@ impl FetcherRule {
             HashStrategy::Patch => {
                 anyhow::bail!("Patch hashing should be handled via check_fetchpatch_call")
             }
-            HashStrategy::None => anyhow::bail!("No hash needed for this fetcher"),
+            HashStrategy::None => {
+                anyhow::bail!("No hash needed for this fetcher")
+            }
         }
     }
 }
@@ -922,17 +1029,17 @@ impl UpdateRule for FetcherRule {
         true
     }
 
-    fn check(&self, node: &NixNode) -> Result<Option<Vec<UpdateGroup>>> {
+    fn check(&self, node: &NixNode) -> CheckResult {
         let call = match Self::try_extract_call(node) {
             Some(call) => call,
-            None => return Ok(None),
+            None => return CheckResult::empty(),
         };
 
         let target = call.kind.display_target(&call.parsed);
 
-        let result = match call.kind {
-            FetcherKind::FetchPatch => Self::check_fetchpatch_call(&call)?,
-            FetcherKind::FetchTarball => Self::check_fetchtarball_call(&call)?,
+        let mut result = match call.kind {
+            FetcherKind::FetchPatch => Self::check_fetchpatch_call(&call),
+            FetcherKind::FetchTarball => Self::check_fetchtarball_call(&call),
             FetcherKind::BuiltinsFetchGit
             | FetcherKind::FetchGit
             | FetcherKind::FetchFromGitHub
@@ -943,17 +1050,16 @@ impl UpdateRule for FetcherRule {
             | FetcherKind::FetchFromBitbucket
             | FetcherKind::FetchFromSourcehut
             | FetcherKind::FetchFromGitiles
-            | FetcherKind::FetchFromRepoOrCz => self.check_fetcher_call(&call)?,
+            | FetcherKind::FetchFromRepoOrCz => self.check_fetcher_call(&call),
         };
 
-        Ok(result
-            .map(|mut group| {
-                for update in group.updates.iter_mut() {
-                    update.target = target.clone();
-                }
-                group
-            })
-            .map(|group| vec![group]))
+        for group in &mut result.groups {
+            for update in group.updates.iter_mut() {
+                update.target = target.clone();
+            }
+        }
+
+        result
     }
 }
 
@@ -1514,18 +1620,22 @@ stdenv.mkDerivation (finalAttrs: {
     }
 
     #[test]
+
     fn test_parse_follow_spec_branch() {
-        let spec = super::parse_follow_spec("branch main");
+        let (spec, warnings) = super::parse_follow_spec("branch main");
         assert!(matches!(spec, Some(super::FollowSpec::Branch(_))));
+        assert!(warnings.is_empty());
         if let Some(super::FollowSpec::Branch(name)) = spec {
             assert_eq!(name, "main");
         }
     }
 
     #[test]
+
     fn test_parse_follow_spec_regex() {
-        let spec = super::parse_follow_spec("regex v[0-9]+\\.[0-9]+");
+        let (spec, warnings) = super::parse_follow_spec("regex v[0-9]+\\.[0-9]+");
         assert!(matches!(spec, Some(super::FollowSpec::Regex(_))));
+        assert!(warnings.is_empty());
         if let Some(super::FollowSpec::Regex(re)) = spec {
             assert!(re.is_match("v1.0"));
             assert!(re.is_match("v2.41"));
@@ -1534,8 +1644,9 @@ stdenv.mkDerivation (finalAttrs: {
     }
 
     #[test]
+
     fn test_parse_follow_spec_regex_full_match() {
-        let spec = super::parse_follow_spec("regex v[0-9]+\\.[0-9]+");
+        let (spec, _) = super::parse_follow_spec("regex v[0-9]+\\.[0-9]+");
         if let Some(super::FollowSpec::Regex(re)) = spec {
             assert!(re.is_match("v1.0"));
             assert!(!re.is_match("v1.0.0"));
@@ -1544,8 +1655,9 @@ stdenv.mkDerivation (finalAttrs: {
     }
 
     #[test]
+
     fn test_parse_follow_spec_semver() {
-        let spec = super::parse_follow_spec("semver 0.1");
+        let (spec, _) = super::parse_follow_spec("semver 0.1");
         if let Some(super::FollowSpec::Semver(req)) = spec {
             assert!(req.matches(&semver::Version::parse("0.1.5").unwrap()));
             assert!(!req.matches(&semver::Version::parse("1.0.0").unwrap()));
@@ -1555,8 +1667,9 @@ stdenv.mkDerivation (finalAttrs: {
     }
 
     #[test]
+
     fn test_parse_follow_spec_semver_gt() {
-        let spec = super::parse_follow_spec("semver >0.1.0");
+        let (spec, _) = super::parse_follow_spec("semver >0.1.0");
         if let Some(super::FollowSpec::Semver(req)) = spec {
             assert!(req.matches(&semver::Version::parse("0.2.0").unwrap()));
             assert!(!req.matches(&semver::Version::parse("0.1.0").unwrap()));
@@ -1566,8 +1679,9 @@ stdenv.mkDerivation (finalAttrs: {
     }
 
     #[test]
+
     fn test_parse_follow_spec_semver_caret() {
-        let spec = super::parse_follow_spec("semver ^0.1");
+        let (spec, _) = super::parse_follow_spec("semver ^0.1");
         if let Some(super::FollowSpec::Semver(req)) = spec {
             assert!(req.matches(&semver::Version::parse("0.1.5").unwrap()));
             assert!(!req.matches(&semver::Version::parse("1.0.0").unwrap()));
@@ -1577,16 +1691,26 @@ stdenv.mkDerivation (finalAttrs: {
     }
 
     #[test]
+
     fn test_parse_follow_spec_invalid() {
-        assert!(super::parse_follow_spec("unknown foo").is_none());
-        assert!(super::parse_follow_spec("branch").is_none());
-        assert!(super::parse_follow_spec("regex").is_none());
-        assert!(super::parse_follow_spec("semver").is_none());
-        assert!(super::parse_follow_spec("nonsense").is_none());
+        let (spec, warnings) = super::parse_follow_spec("unknown foo");
+        assert!(spec.is_none());
+        assert!(warnings.is_empty());
+        assert!(super::parse_follow_spec("branch").0.is_none());
+        assert!(super::parse_follow_spec("regex").0.is_none());
+        assert!(super::parse_follow_spec("semver").0.is_none());
+        assert!(super::parse_follow_spec("nonsense").0.is_none());
     }
 
     #[test]
+
     fn test_parse_follow_spec_invalid_regex() {
-        assert!(super::parse_follow_spec("regex [invalid").is_none());
+        let (result, warnings) = super::parse_follow_spec("regex [invalid");
+        assert!(result.is_none());
+        assert_eq!(warnings.len(), 1);
+        assert!(matches!(
+            warnings[0],
+            crate::rules::traits::CheckWarning::InvalidFollowDirective { .. }
+        ));
     }
 }

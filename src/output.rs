@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 use std::path::Path;
 
-use nix_update_git::rules::Update;
+use nix_update_git::rules::{CheckWarning, Update};
 use serde::Serialize;
 
 use crate::check::FileResult;
@@ -30,6 +30,12 @@ impl UpdateEntry {
             range: [u.range.start, u.range.end],
             target: u.target.clone(),
         }
+    }
+}
+
+pub fn print_warnings(warnings: &[CheckWarning]) {
+    for warning in warnings {
+        eprintln!("Warning: {warning}");
     }
 }
 
