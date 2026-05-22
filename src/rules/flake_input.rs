@@ -1,5 +1,5 @@
 use crate::parser::{AttrSpec, AttrType, NixNode, TextRange};
-use crate::rules::traits::{CheckResult, Update, UpdateGroup, UpdateRule};
+use crate::rules::traits::{CheckResult, CheckWarning, Update, UpdateGroup, UpdateRule};
 use crate::utils::{GitFetcher, VersionDetector};
 use std::collections::HashMap;
 
@@ -485,6 +485,7 @@ impl UpdateRule for FlakeInputRule {
 
     fn check(&self, node: &NixNode) -> CheckResult {
         let mut groups = Vec::new();
+        let mut warnings = Vec::new();
 
         let root_attrs = match Self::find_root_attr_set(node) {
             Some(attrs) => attrs,
@@ -524,46 +525,48 @@ impl UpdateRule for FlakeInputRule {
 
             let target = parsed.flake_url.display_target();
 
-            if let Ok(Some(latest_tag)) =
-                GitFetcher::get_latest_tag_matching(&remote_url, Some(&ref_sv.value))
-                && VersionDetector::compare(&ref_sv.value, &latest_tag) == std::cmp::Ordering::Less
-            {
-                let mut input_updates = Vec::new();
-                if input_def.inline_ref {
-                    if let Some(new_url) = Self::reconstruct_url(&url_sv.value, &latest_tag) {
+            match GitFetcher::get_latest_tag_matching(&remote_url, Some(&ref_sv.value)) {
+                Ok(Some(latest_tag))
+                    if VersionDetector::compare(&ref_sv.value, &latest_tag)
+                        == std::cmp::Ordering::Less =>
+                {
+                    let mut input_updates = Vec::new();
+                    if input_def.inline_ref {
+                        if let Some(new_url) = Self::reconstruct_url(&url_sv.value, &latest_tag) {
+                            input_updates.push(
+                                Update::new(
+                                    format!("inputs.{}.url", input_def.name),
+                                    format!("\"{}\"", new_url),
+                                    url_sv.range,
+                                )
+                                .with_target(target),
+                            );
+                        }
+                    } else {
                         input_updates.push(
                             Update::new(
-                                format!("inputs.{}.url", input_def.name),
-                                format!("\"{}\"", new_url),
-                                url_sv.range,
+                                format!("inputs.{}.ref", input_def.name),
+                                format!("\"{}\"", latest_tag),
+                                ref_sv.range,
                             )
                             .with_target(target),
                         );
                     }
-                } else {
-                    input_updates.push(
-                        Update::new(
-                            format!("inputs.{}.ref", input_def.name),
-                            format!("\"{}\"", latest_tag),
-                            ref_sv.range,
-                        )
-                        .with_target(target),
-                    );
+                    if !input_updates.is_empty() {
+                        groups.push(UpdateGroup::new(input_updates));
+                    }
                 }
-                if !input_updates.is_empty() {
-                    groups.push(UpdateGroup::new(input_updates));
+                Ok(_) => {}
+                Err(e) => {
+                    warnings.push(CheckWarning::FollowResolutionFailed {
+                        git_url: remote_url,
+                        source: e,
+                    });
                 }
             }
         }
 
-        if groups.is_empty() {
-            CheckResult::empty()
-        } else {
-            CheckResult {
-                groups,
-                warnings: vec![],
-            }
-        }
+        CheckResult { groups, warnings }
     }
 }
 

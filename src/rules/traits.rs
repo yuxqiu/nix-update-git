@@ -92,11 +92,15 @@ impl fmt::Display for CheckWarning {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             CheckWarning::HashPrefetchFailed { url, rev, source } => {
-                write!(
-                    f,
-                    "could not prefetch hash for {} @ {}: {:#}",
-                    url, rev, source
-                )
+                if rev.is_empty() {
+                    write!(f, "could not prefetch hash for {}: {:#}", url, source)
+                } else {
+                    write!(
+                        f,
+                        "could not prefetch hash for {} @ {}: {:#}",
+                        url, rev, source
+                    )
+                }
             }
             CheckWarning::FollowResolutionFailed { git_url, source } => {
                 write!(f, "could not resolve follow for {}: {:#}", git_url, source)
@@ -137,24 +141,11 @@ impl CheckResult {
             warnings: Vec::new(),
         }
     }
-
-    pub fn with_group(group: UpdateGroup) -> Self {
-        Self {
-            groups: vec![group],
-            warnings: Vec::new(),
-        }
-    }
-
     pub fn with_warnings(warnings: Vec<CheckWarning>) -> Self {
         Self {
             groups: Vec::new(),
             warnings,
         }
-    }
-
-    pub fn merge(&mut self, other: CheckResult) {
-        self.groups.extend(other.groups);
-        self.warnings.extend(other.warnings);
     }
 }
 
