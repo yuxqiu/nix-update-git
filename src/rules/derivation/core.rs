@@ -7,7 +7,7 @@ use crate::rules::fetcher::{
     InterpolationSpec, git_fetch, is_commit_hash, kind::FetcherKind, kind::HashStrategy,
     parse_fetcher_attrset, preferred_ref_key, resolve_ref_for_prefetch, tarball,
 };
-use crate::rules::traits::{Update, UpdateRule};
+use crate::rules::traits::{Update, UpdateGroup, UpdateRule};
 use crate::utils::{GitFetcher, NarHash, VersionDetector};
 
 struct DerivationCall {
@@ -286,7 +286,7 @@ impl DerivationRule {
     fn check_derivation_call(
         rule_name: &str,
         call: &DerivationCall,
-    ) -> Result<Option<Vec<Update>>> {
+    ) -> Result<Option<UpdateGroup>> {
         if call.pinned {
             return Ok(None);
         }
@@ -414,6 +414,7 @@ impl DerivationRule {
                 .is_some_and(String::is_empty);
         let should_refresh_hash =
             call.fetcher_kind.needs_hash() && (hash_empty || effective_ref_changed);
+        let mut hash_failed = false;
         if should_refresh_hash {
             let rev_for_hash = if let Some(new_ref_text) = new_source_ref_text.as_ref() {
                 resolve_ref_for_prefetch(&git_url, new_ref_text)
@@ -464,15 +465,22 @@ impl DerivationRule {
                             "Warning: could not prefetch hash for {} @ {}: {}",
                             git_url, rev_for_hash, e
                         );
+                        hash_failed = true;
                     }
                 }
+            } else {
+                hash_failed = true;
             }
+        }
+
+        if hash_failed {
+            return Ok(None);
         }
 
         if updates.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(updates))
+            Ok(Some(UpdateGroup::new(updates)))
         }
     }
 }
@@ -486,7 +494,7 @@ impl UpdateRule for DerivationRule {
         node.kind() == rnix::SyntaxKind::NODE_APPLY
     }
 
-    fn check(&self, node: &NixNode) -> Result<Option<Vec<Update>>> {
+    fn check(&self, node: &NixNode) -> Result<Option<Vec<UpdateGroup>>> {
         let call = match self.try_extract_call(node) {
             Some(call) => call,
             None => return Ok(None),
@@ -494,16 +502,16 @@ impl UpdateRule for DerivationRule {
 
         let target = call.fetcher_kind.display_target(&call.fetcher_parsed);
 
-        let mut updates = match Self::check_derivation_call(&self.rule_name, &call)? {
-            Some(updates) => updates,
+        let mut group = match Self::check_derivation_call(&self.rule_name, &call)? {
+            Some(group) => group,
             None => return Ok(None),
         };
 
-        for update in updates.iter_mut() {
+        for update in group.updates.iter_mut() {
             update.target = target.clone();
         }
 
-        Ok(Some(updates))
+        Ok(Some(vec![group]))
     }
 }
 

@@ -146,7 +146,8 @@ fn main() -> Result<()> {
 
         if cli.update {
             let to_apply = if cli.interactive {
-                select_interactive(&fr, &fr.all_updates())
+                let groups = fr.all_groups();
+                select_interactive(&fr, &groups)
             } else {
                 fr.all_updates()
             };

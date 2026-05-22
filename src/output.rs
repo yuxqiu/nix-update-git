@@ -34,22 +34,25 @@ impl UpdateEntry {
 }
 
 pub fn print_updates(fr: &FileResult) {
-    for (rule_name, updates) in &fr.updates_per_rule {
+    for (rule_name, groups) in &fr.updates_per_rule {
+        let total_updates: usize = groups.iter().map(|g| g.updates.len()).sum();
         println!(
             "{}: Found {} update(s) from rule '{}':",
             fr.file_path.display(),
-            updates.len(),
+            total_updates,
             rule_name,
         );
-        for u in updates {
-            let old_text = &fr.content[u.range.start..u.range.end];
-            if let Some(target) = u.target.as_deref() {
-                println!(
-                    "  - {} ({}): {} -> {}",
-                    u.field, target, old_text, u.replacement
-                );
-            } else {
-                println!("  - {}: {} -> {}", u.field, old_text, u.replacement);
+        for group in groups {
+            for u in &group.updates {
+                let old_text = &fr.content[u.range.start..u.range.end];
+                if let Some(target) = u.target.as_deref() {
+                    println!(
+                        "  - {} ({}): {} -> {}",
+                        u.field, target, old_text, u.replacement
+                    );
+                } else {
+                    println!("  - {}: {} -> {}", u.field, old_text, u.replacement);
+                }
             }
         }
     }
@@ -62,24 +65,37 @@ pub fn print_json(entries: &[UpdateEntry]) {
     }
 }
 
-fn prompt_confirmation(update: &Update, old_text: &str) -> bool {
-    print!(
-        "  Update {}? ({} -> {}) [y/N] ",
-        update.field, old_text, update.replacement
-    );
+fn prompt_group_confirmation(fr: &FileResult, group: &nix_update_git::rules::UpdateGroup) -> bool {
+    // If group has only one update, prompt normally
+    if group.updates.len() == 1 {
+        let u = &group.updates[0];
+        let old_text = &fr.content[u.range.start..u.range.end];
+        print!(
+            "  Update {}? ({} -> {}) [y/N] ",
+            u.field, old_text, u.replacement
+        );
+    } else {
+        // For multi-update groups, show all updates and prompt once
+        println!("  Update group ({} changes):", group.updates.len());
+        for u in &group.updates {
+            let old_text = &fr.content[u.range.start..u.range.end];
+            println!("    - {}: {} -> {}", u.field, old_text, u.replacement);
+        }
+        print!("  Apply all {}? [y/N] ", group.updates.len());
+    }
     io::stdout().flush().ok();
     let mut input = String::new();
     io::stdin().read_line(&mut input).ok();
     matches!(input.trim().to_lowercase().as_str(), "y" | "yes")
 }
 
-pub fn select_interactive(fr: &FileResult, updates: &[Update]) -> Vec<Update> {
-    updates
+pub fn select_interactive(
+    fr: &FileResult,
+    groups: &[&nix_update_git::rules::UpdateGroup],
+) -> Vec<Update> {
+    groups
         .iter()
-        .filter(|u| {
-            let old_text = &fr.content[u.range.start..u.range.end];
-            prompt_confirmation(u, old_text)
-        })
-        .cloned()
+        .filter(|group| prompt_group_confirmation(fr, group))
+        .flat_map(|group| group.updates.clone())
         .collect()
 }

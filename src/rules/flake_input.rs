@@ -1,5 +1,5 @@
 use crate::parser::{AttrSpec, AttrType, NixNode, TextRange};
-use crate::rules::traits::{Update, UpdateRule};
+use crate::rules::traits::{Update, UpdateGroup, UpdateRule};
 use crate::utils::{GitFetcher, VersionDetector};
 use anyhow::Result;
 use std::collections::HashMap;
@@ -484,8 +484,8 @@ impl UpdateRule for FlakeInputRule {
         node.kind() == rnix::SyntaxKind::NODE_ROOT
     }
 
-    fn check(&self, node: &NixNode) -> Result<Option<Vec<Update>>> {
-        let mut updates = Vec::new();
+    fn check(&self, node: &NixNode) -> Result<Option<Vec<UpdateGroup>>> {
+        let mut groups = Vec::new();
 
         let root_attrs = match Self::find_root_attr_set(node) {
             Some(attrs) => attrs,
@@ -529,9 +529,10 @@ impl UpdateRule for FlakeInputRule {
                 GitFetcher::get_latest_tag_matching(&remote_url, Some(&ref_sv.value))
                 && VersionDetector::compare(&ref_sv.value, &latest_tag) == std::cmp::Ordering::Less
             {
+                let mut input_updates = Vec::new();
                 if input_def.inline_ref {
                     if let Some(new_url) = Self::reconstruct_url(&url_sv.value, &latest_tag) {
-                        updates.push(
+                        input_updates.push(
                             Update::new(
                                 format!("inputs.{}.url", input_def.name),
                                 format!("\"{}\"", new_url),
@@ -541,7 +542,7 @@ impl UpdateRule for FlakeInputRule {
                         );
                     }
                 } else {
-                    updates.push(
+                    input_updates.push(
                         Update::new(
                             format!("inputs.{}.ref", input_def.name),
                             format!("\"{}\"", latest_tag),
@@ -550,13 +551,16 @@ impl UpdateRule for FlakeInputRule {
                         .with_target(target),
                     );
                 }
+                if !input_updates.is_empty() {
+                    groups.push(UpdateGroup::new(input_updates));
+                }
             }
         }
 
-        if updates.is_empty() {
+        if groups.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(updates))
+            Ok(Some(groups))
         }
     }
 }

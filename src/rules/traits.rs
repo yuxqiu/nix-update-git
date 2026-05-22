@@ -27,10 +27,29 @@ impl Update {
     }
 }
 
+/// A group of updates that must be applied atomically.
+/// If any update in the group depends on a computation that fails
+/// (e.g., hash prefetch in flaky network), the entire group is discarded
+/// to avoid leaving the file in an inconsistent state.
+#[derive(Debug, Clone)]
+pub struct UpdateGroup {
+    pub updates: Vec<Update>,
+}
+
+impl UpdateGroup {
+    pub fn new(updates: Vec<Update>) -> Self {
+        Self { updates }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.updates.is_empty()
+    }
+}
+
 pub trait UpdateRule: Send + Sync {
     fn name(&self) -> &str;
     fn matches(&self, node: &NixNode) -> bool;
-    fn check(&self, node: &NixNode) -> Result<Option<Vec<Update>>>;
+    fn check(&self, node: &NixNode) -> Result<Option<Vec<UpdateGroup>>>;
 }
 
 pub struct RuleRegistry {
@@ -46,19 +65,21 @@ impl RuleRegistry {
         self.rules.push(Box::new(rule));
     }
 
-    pub fn check_all(&self, root: &NixNode) -> Result<Vec<(String, Vec<Update>)>> {
+    pub fn check_all(&self, root: &NixNode) -> Result<Vec<(String, Vec<UpdateGroup>)>> {
         let mut results = Vec::new();
         for node in root.traverse() {
             for rule in &self.rules {
                 if rule.matches(&node)
-                    && let Some(mut updates) = rule.check(&node)?
-                    && !updates.is_empty()
+                    && let Some(mut groups) = rule.check(&node)?
+                    && !groups.is_empty()
                 {
                     let rule_name = rule.name().to_string();
-                    for update in &mut updates {
-                        update.rule_name = rule_name.clone();
+                    for group in &mut groups {
+                        for update in &mut group.updates {
+                            update.rule_name = rule_name.clone();
+                        }
                     }
-                    results.push((rule_name, updates));
+                    results.push((rule_name, groups));
                 }
             }
         }

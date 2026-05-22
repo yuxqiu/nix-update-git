@@ -77,7 +77,7 @@ Workspace with two crates. Edition 2024 (requires Rust ≥ 1.85).
 - `src/rules/fetcher/tarball.rs` — `compute_hash()` for tarball-based fetchers (GitHub, GitLab, Gitea, Forgejo, Codeberg, SourceHut, Bitbucket, Gitiles, RepoOrCz); constructs tarball URLs and delegates to `TarballHasher`
 - `src/rules/fetcher/git_fetch.rs` — `compute_hash()` for git-based fetchers; builds `PrefetchArgs` from fetcher params and delegates to `nix_prefetch_git::prefetch`
 - `src/rules/flake_input.rs` — the main rule; parses flake input URLs (github:, gitlab:, sourcehut:, git+https/ssh/file) and detects version updates via `git ls-remote`
-- `src/rules/traits.rs` — `UpdateRule` trait (with `matches` node-type filter and `check` per-node processing), `Update` struct (carries `TextRange` for in-place editing), `RuleRegistry` (single AST traversal dispatching each node to matching rules)
+- `src/rules/traits.rs` — `UpdateRule` trait (with `matches` node-type filter and `check` per-node processing), `Update` struct (carries `TextRange` for in-place editing), `UpdateGroup` struct (groups atomically-committed updates; if hash computation fails, the entire group is discarded to avoid inconsistent state), `RuleRegistry` (single AST traversal dispatching each node to matching rules)
 - `src/utils/version.rs` — version comparison (`VersionDetector`); `prefix()` extracts non-numeric prefix; `latest_matching()` filters candidates by prefix shape
 - `src/utils/fetch.rs` — `GitFetcher` wraps `git ls-remote`; `get_latest_tag_matching()` accepts current version for shape-aware tag selection
 - `src/utils/tarball.rs` — `TarballHasher` downloads + unpacks tarballs, then NAR-hashes the result via `nix_prefetch_git::nar::hash_path`
@@ -85,6 +85,7 @@ Workspace with two crates. Edition 2024 (requires Rust ≥ 1.85).
 ## Key design decisions
 
 - `Update.range` is a `TextRange { start, end }` (byte offsets into source). Update mode replaces the node's source range directly — it does NOT re-serialize the AST.
+- `UpdateGroup` groups related updates (e.g., rev + hash from the same fetcher call) that must be applied atomically. If hash computation fails (e.g., flaky network), the entire group is discarded rather than issuing a partial update (like bumping rev without updating hash), which would leave the file in an inconsistent state.
 - `has_pin_comment()` checks only immediate `# pin` tokens on the node, not recursive descendants. A comment deep inside a nested attr set won't pin the parent input.
 - `--check` and `--update` are mutually exclusive. The CLI exits with code 1 on parse errors or rule check errors.
 - `--format json` outputs machine-readable JSON instead of human-readable text. Each entry has `file`, `rule`, `field`, `old`, `new`, `range` (byte offsets).

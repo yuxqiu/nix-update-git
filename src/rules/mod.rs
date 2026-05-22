@@ -11,4 +11,4 @@ pub use derivation::{
 };
 pub use fetcher::FetcherRule;
 pub use flake_input::FlakeInputRule;
-pub use traits::{RuleRegistry, Update, UpdateRule};
+pub use traits::{RuleRegistry, Update, UpdateGroup, UpdateRule};

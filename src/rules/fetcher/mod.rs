@@ -4,7 +4,7 @@ use anyhow::Result;
 
 use crate::parser::{NixNode, ParsedAttrs};
 use crate::rules::derivation::OWNED_FUNC_NAMES;
-use crate::rules::traits::{Update, UpdateRule};
+use crate::rules::traits::{Update, UpdateGroup, UpdateRule};
 use crate::utils::{GitFetcher, NarHash, VersionDetector};
 
 use kind::{FetcherKind, HashStrategy};
@@ -305,7 +305,7 @@ impl FetcherRule {
         })
     }
 
-    fn check_fetcher_call(&self, call: &FetcherCall) -> Result<Option<Vec<Update>>> {
+    fn check_fetcher_call(&self, call: &FetcherCall) -> Result<Option<UpdateGroup>> {
         let git_url = match call.kind.git_url(&call.parsed) {
             Some(url) => url,
             None => return Ok(None),
@@ -327,22 +327,26 @@ impl FetcherRule {
             }
         }
 
-        if call.kind.needs_hash() {
-            if let Some(rev) = &version_updated_rev {
-                Self::try_prefetch_hash(call, rev, &mut updates);
+        let needs_hash = call.kind.needs_hash();
+        if needs_hash {
+            let hash_ok = if let Some(rev) = &version_updated_rev {
+                Self::try_prefetch_hash(call, rev, &mut updates)
             } else {
-                Self::try_prefetch_empty_hash(call, &git_url, &mut updates);
+                Self::try_prefetch_empty_hash(call, &git_url, &mut updates)
+            };
+            if !hash_ok {
+                return Ok(None);
             }
         }
 
         if updates.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(updates))
+            Ok(Some(UpdateGroup::new(updates)))
         }
     }
 
-    fn check_fetchpatch_call(call: &FetcherCall) -> Result<Option<Vec<Update>>> {
+    fn check_fetchpatch_call(call: &FetcherCall) -> Result<Option<UpdateGroup>> {
         let url = match call.parsed.strings.get("url") {
             Some(url) => url.clone(),
             None => match call.parsed.pure_string_list("urls") {
@@ -488,6 +492,7 @@ impl FetcherRule {
             && !has_non_sha256_hash_algo
             && can_decode;
 
+        let mut hash_ok = true;
         if needs_hash {
             let has_hash_source = call.parsed.has_string("hash")
                 || call.parsed.has_string("sha256")
@@ -538,19 +543,24 @@ impl FetcherRule {
                             "Warning: could not prefetch hash for fetchpatch {}: {:#}",
                             current_url, e
                         );
+                        hash_ok = false;
                     }
                 }
             }
         }
 
+        if needs_hash && !hash_ok {
+            return Ok(None);
+        }
+
         if updates.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(updates))
+            Ok(Some(UpdateGroup::new(updates)))
         }
     }
 
-    fn check_fetchtarball_call(call: &FetcherCall) -> Result<Option<Vec<Update>>> {
+    fn check_fetchtarball_call(call: &FetcherCall) -> Result<Option<UpdateGroup>> {
         let url = match call.parsed.strings.get("url") {
             Some(url) => url.clone(),
             None => match call.parsed.pure_string_list("urls") {
@@ -621,6 +631,7 @@ impl FetcherRule {
                 .is_some_and(|h| h.is_empty()))
             && call.kind.needs_hash();
 
+        let mut hash_ok = true;
         if needs_hash {
             let has_hash_source =
                 call.parsed.has_string("hash") || call.parsed.has_string("sha256");
@@ -649,15 +660,20 @@ impl FetcherRule {
                             "Warning: could not prefetch hash for fetchTarball {}: {:#}",
                             current_url, e
                         );
+                        hash_ok = false;
                     }
                 }
             }
         }
 
+        if needs_hash && !hash_ok {
+            return Ok(None);
+        }
+
         if updates.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(updates))
+            Ok(Some(UpdateGroup::new(updates)))
         }
     }
 
@@ -748,9 +764,10 @@ impl FetcherRule {
         resolve_ref_for_prefetch(git_url, ref_value)
     }
 
-    fn try_prefetch_hash(call: &FetcherCall, rev: &str, updates: &mut Vec<Update>) {
+    fn try_prefetch_hash(call: &FetcherCall, rev: &str, updates: &mut Vec<Update>) -> bool {
         if !call.parsed.has_string("hash") && !call.parsed.has_string("sha256") {
-            return;
+            // No hash field to update — not a failure, just nothing to do.
+            return true;
         }
 
         let result = Self::compute_hash(call, rev);
@@ -771,6 +788,7 @@ impl FetcherRule {
                         range,
                     ));
                 }
+                true
             }
             Err(e) => {
                 let git_url = call.kind.git_url(&call.parsed).unwrap_or_default();
@@ -778,11 +796,16 @@ impl FetcherRule {
                     "Warning: could not prefetch hash for {} @ {}: {:#}",
                     git_url, rev, e
                 );
+                false
             }
         }
     }
 
-    fn try_prefetch_empty_hash(call: &FetcherCall, git_url: &str, updates: &mut Vec<Update>) {
+    fn try_prefetch_empty_hash(
+        call: &FetcherCall,
+        git_url: &str,
+        updates: &mut Vec<Update>,
+    ) -> bool {
         let has_empty_hash = call
             .parsed
             .strings
@@ -795,11 +818,13 @@ impl FetcherRule {
                 .is_some_and(|h| h.is_empty());
 
         if !has_empty_hash {
-            return;
+            return false;
         }
 
         if let Some(rev) = Self::resolve_rev(call, git_url) {
-            Self::try_prefetch_hash(call, &rev, updates);
+            Self::try_prefetch_hash(call, &rev, updates)
+        } else {
+            false
         }
     }
 
@@ -897,7 +922,7 @@ impl UpdateRule for FetcherRule {
         true
     }
 
-    fn check(&self, node: &NixNode) -> Result<Option<Vec<Update>>> {
+    fn check(&self, node: &NixNode) -> Result<Option<Vec<UpdateGroup>>> {
         let call = match Self::try_extract_call(node) {
             Some(call) => call,
             None => return Ok(None),
@@ -905,7 +930,7 @@ impl UpdateRule for FetcherRule {
 
         let target = call.kind.display_target(&call.parsed);
 
-        let mut updates = match call.kind {
+        let result = match call.kind {
             FetcherKind::FetchPatch => Self::check_fetchpatch_call(&call)?,
             FetcherKind::FetchTarball => Self::check_fetchtarball_call(&call)?,
             FetcherKind::BuiltinsFetchGit
@@ -921,13 +946,14 @@ impl UpdateRule for FetcherRule {
             | FetcherKind::FetchFromRepoOrCz => self.check_fetcher_call(&call)?,
         };
 
-        if let Some(updates) = &mut updates {
-            for update in updates.iter_mut() {
-                update.target = target.clone();
-            }
-        }
-
-        Ok(updates)
+        Ok(result
+            .map(|mut group| {
+                for update in group.updates.iter_mut() {
+                    update.target = target.clone();
+                }
+                group
+            })
+            .map(|group| vec![group]))
     }
 }
 
