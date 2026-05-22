@@ -57,6 +57,10 @@ Nix files in `data/` are processed by the custom test harness in `tests/snapshot
 
 Add a `# redact: field1 field2 ...` directive on the first line of the `.nix` file. Listed fields are omitted from the snapshot output. This allows selective redaction of non-deterministic fields like `new` and `range`.
 
+### Disabling Flaky Tests
+
+Add a `# ignored` directive on the first line of the `.nix` file to mark the test as permanently ignored. Ignored tests are skipped regardless of the `network-tests` feature flag. Use this for tests that depend on flaky external services.
+
 ## Updating Existing Snapshots
 
 ```bash

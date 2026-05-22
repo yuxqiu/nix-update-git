@@ -33,6 +33,13 @@ fn parse_redact_directive(nix_path: &Path) -> HashSet<String> {
     }
 }
 
+/// Check if the `.nix` file has a `# ignored` directive on its first line.
+fn is_ignored(nix_path: &Path) -> bool {
+    let content = fs::read_to_string(nix_path).unwrap_or_default();
+    let first_line = content.lines().next().unwrap_or("");
+    first_line.starts_with("# ignored")
+}
+
 fn run_json_check(file: &str) -> String {
     let mut cmd = Command::cargo_bin("nix-update-git").unwrap();
     cmd.arg("--format").arg("json").arg(file);
@@ -170,9 +177,10 @@ fn main() {
                 .to_string_lossy()
                 .into_owned();
 
+            let ignored = is_ignored(&path);
             let data_dir_clone = data_dir.clone();
             Trial::test(name, move || run_snapshot_test(&path, &data_dir_clone))
-                .with_ignored_flag(!is_network)
+                .with_ignored_flag(!is_network || ignored)
         })
         .collect();
 

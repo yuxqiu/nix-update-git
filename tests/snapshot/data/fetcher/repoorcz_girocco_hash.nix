@@ -1,3 +1,4 @@
+# ignored
 # Pinned fetchFromRepoOrCz with empty hash for girocco on repo.or.cz.
 # The # pin comment prevents version updates; only the empty hash should
 # be filled using the tarball URL:

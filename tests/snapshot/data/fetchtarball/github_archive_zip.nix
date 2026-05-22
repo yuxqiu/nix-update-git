@@ -1,3 +1,4 @@
+# ignored
 # redact: new range
 # GitHub archive URL with .zip extension, not pinned.
 # Tests that fetchTarball handles .zip archive URLs (not just .tar.gz).
