@@ -13,7 +13,7 @@ use nix_update_git::rules::{
     build_emscripten_package_rule, build_gem_rule, build_go_module_rule,
     build_haskell_package_rule, build_mix_package_rule, build_npm_package_rule,
     build_python_package_rule, build_rebar3_release_rule, build_rust_package_rule,
-    mk_derivation_rule,
+    build_vim_plugin_rule, mk_derivation_rule,
 };
 use rayon::prelude::*;
 use walkdir::WalkDir;
@@ -79,6 +79,9 @@ fn main() -> Result<()> {
     }
     if rule_enabled("mk-derivation") {
         registry.register(mk_derivation_rule());
+    }
+    if rule_enabled("build-vim-plugin") {
+        registry.register(build_vim_plugin_rule());
     }
     if rule_enabled("build-rust-package") {
         registry.register(build_rust_package_rule());

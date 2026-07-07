@@ -22,6 +22,7 @@ pub enum RuleName {
     BuildGem,
     BuildHaskellPackage,
     BuildEmscriptenPackage,
+    BuildVimPlugin,
 }
 
 impl RuleName {
@@ -41,6 +42,7 @@ impl RuleName {
             RuleName::BuildGem => "build-gem",
             RuleName::BuildHaskellPackage => "build-haskell-package",
             RuleName::BuildEmscriptenPackage => "build-emscripten-package",
+            RuleName::BuildVimPlugin => "build-vim-plugin",
         }
     }
 
@@ -53,7 +55,12 @@ impl RuleName {
 }
 
 pub fn default_rules() -> Vec<RuleName> {
-    vec![RuleName::Fetcher, RuleName::Flake, RuleName::MkDerivation]
+    vec![
+        RuleName::Fetcher,
+        RuleName::Flake,
+        RuleName::MkDerivation,
+        RuleName::BuildVimPlugin,
+    ]
 }
 
 #[derive(Parser, Debug)]

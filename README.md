@@ -9,6 +9,7 @@ Update git references in Nix flake files and Nix expressions.
 - **Flake inputs**: update `ref` values and inline `?ref=` in URL strings
 - **Fetcher calls**: update `rev`, `tag`, and `ref` in `fetchgit`, `fetchFromGitHub`, `fetchFromGitLab`, `fetchFromGitea`, `fetchFromForgejo`, `fetchFromCodeberg`, `fetchFromSourcehut`, `fetchFromBitbucket`, `fetchFromRepoOrCz`, `fetchFromGitiles`, `fetchpatch`, `fetchTarball`, and `builtins.fetchGit`
 - **mkDerivation**: update `version` and corresponding source ref (`tag`/`rev`/`ref`) and hash in `stdenv.mkDerivation rec { ... }` patterns
+- **buildVimPlugin**: update `version` and corresponding source ref and hash in `vimUtils.buildVimPlugin { ... }` patterns
 - **Derivation rules**: additional rules for language-specific builders (`buildRustPackage`, `buildGoModule`, `buildPythonPackage`, etc.) that follow the same `version` + `src` pattern as `mkDerivation`; not enabled by default due to extra dependencies (e.g. `cargoHash`, `vendorHash`)
 - **Branch following**: use `# follow:branch <name>` comments to track a branch's latest commit instead of version tags
 - **Pinning**: `# pin` comments on any input or fetcher call skips it entirely
@@ -121,6 +122,7 @@ nix-update-git --rules all file.nix
 | `fetcher` | yes | — | Standalone fetcher calls (`fetchgit`, `fetchFromGitHub`, etc.) |
 | `flake` | yes | — | Flake input URLs and refs |
 | `mk-derivation` | yes | `mkDerivation` | `stdenv.mkDerivation rec { version = ...; src = fetchX { ... }; }` |
+| `build-vim-plugin` | yes | `vimUtils.buildVimPlugin` | Vim/Neovim plugins |
 | `build-rust-package` | no | `buildRustPackage` | Rust packages (note: does not update `cargoHash`/`cargoHash`) |
 | `build-go-module` | no | `buildGoModule`, `buildGoPackage` | Go modules (note: does not update `vendorHash`) |
 | `build-python-package` | no | `buildPythonPackage`, `buildPythonApplication` | Python packages |

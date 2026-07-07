@@ -17,6 +17,7 @@ pub const OWNED_FUNC_NAMES: &[&str] = &[
     "buildHaskellPackage",
     "mkHaskellPackage",
     "buildEmscriptenPackage",
+    "buildVimPlugin",
 ];
 
 pub fn mk_derivation_rule() -> DerivationRule {
@@ -82,4 +83,8 @@ pub fn build_emscripten_package_rule() -> DerivationRule {
         "build-emscripten-package",
         vec!["buildEmscriptenPackage".to_string()],
     )
+}
+
+pub fn build_vim_plugin_rule() -> DerivationRule {
+    DerivationRule::new("build-vim-plugin", vec!["buildVimPlugin".to_string()])
 }

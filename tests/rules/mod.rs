@@ -1,3 +1,4 @@
+mod build_vim_plugin_test;
 mod common;
 mod fetcher_test;
 mod flake_input_test;
