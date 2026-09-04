@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 
 use crate::parser::{AttrSpec, AttrType, ParsedAttrs};
+use std::sync::LazyLock;
 
 use super::Forge;
 
@@ -11,6 +12,8 @@ const EXTRA_ATTRS: &[AttrSpec] = &[AttrSpec {
     attr_type: AttrType::String,
 }];
 
+static ATTR_SPEC: LazyLock<Vec<AttrSpec>> = LazyLock::new(|| super::compose_attr_spec(EXTRA_ATTRS));
+
 impl Forge for RepoOrCz {
     fn id(&self) -> &'static str {
         "repoorcz"
@@ -20,8 +23,8 @@ impl Forge for RepoOrCz {
         "fetchFromRepoOrCz"
     }
 
-    fn extra_attrs(&self) -> &'static [AttrSpec] {
-        EXTRA_ATTRS
+    fn attr_spec(&self) -> &'static [AttrSpec] {
+        &ATTR_SPEC
     }
 
     fn git_url(&self, parsed: &ParsedAttrs) -> Option<String> {

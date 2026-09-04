@@ -1,4 +1,5 @@
 use std::fmt;
+use std::sync::LazyLock;
 
 use crate::forge::{self, Forge, strip_url_scheme};
 use crate::parser::{AttrSpec, AttrType, ParsedAttrs};
@@ -28,6 +29,8 @@ impl fmt::Debug for FetcherKind {
 impl PartialEq for FetcherKind {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
+            // Relies on every registered forge's `id()` being unique —
+            // enforced by a test in `forge::tests`, not by the type system.
             (Self::Forge(a), Self::Forge(b)) => a.id() == b.id(),
             (Self::FetchGit, Self::FetchGit)
             | (Self::BuiltinsFetchGit, Self::BuiltinsFetchGit)
@@ -61,6 +64,9 @@ const FETCH_GIT_EXTRA_ATTRS: &[AttrSpec] = &[
         attr_type: AttrType::Bool,
     },
 ];
+
+static FETCH_GIT_ATTR_SPEC: LazyLock<Vec<AttrSpec>> =
+    LazyLock::new(|| forge::compose_attr_spec(FETCH_GIT_EXTRA_ATTRS));
 
 const SPEC_BUILTINS_FETCH_GIT: &[AttrSpec] = &[
     AttrSpec {
@@ -309,17 +315,13 @@ impl FetcherKind {
         }
     }
 
-    pub fn attr_spec(&self) -> Vec<AttrSpec> {
+    pub fn attr_spec(&self) -> &'static [AttrSpec] {
         match self {
             Self::Forge(forge) => forge.attr_spec(),
-            Self::FetchGit => forge::COMMON_GIT_ATTRS
-                .iter()
-                .chain(FETCH_GIT_EXTRA_ATTRS)
-                .cloned()
-                .collect(),
-            Self::BuiltinsFetchGit => SPEC_BUILTINS_FETCH_GIT.to_vec(),
-            Self::FetchPatch => SPEC_FETCH_PATCH.to_vec(),
-            Self::FetchTarball => SPEC_FETCH_TARBALL.to_vec(),
+            Self::FetchGit => &FETCH_GIT_ATTR_SPEC,
+            Self::BuiltinsFetchGit => SPEC_BUILTINS_FETCH_GIT,
+            Self::FetchPatch => SPEC_FETCH_PATCH,
+            Self::FetchTarball => SPEC_FETCH_TARBALL,
         }
     }
 

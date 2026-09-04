@@ -1,8 +1,9 @@
 use anyhow::{Context, Result};
 
 use crate::parser::{AttrSpec, AttrType, ParsedAttrs};
+use std::sync::LazyLock;
 
-use super::{Forge, ensure_tilde};
+use super::{FlakeForge, Forge, ensure_tilde};
 
 pub struct SourceHut;
 
@@ -25,6 +26,8 @@ const EXTRA_ATTRS: &[AttrSpec] = &[
     },
 ];
 
+static ATTR_SPEC: LazyLock<Vec<AttrSpec>> = LazyLock::new(|| super::compose_attr_spec(EXTRA_ATTRS));
+
 impl Forge for SourceHut {
     fn id(&self) -> &'static str {
         "sourcehut"
@@ -34,12 +37,8 @@ impl Forge for SourceHut {
         "fetchFromSourcehut"
     }
 
-    fn flake_scheme(&self) -> Option<&'static str> {
-        Some("sourcehut")
-    }
-
-    fn extra_attrs(&self) -> &'static [AttrSpec] {
-        EXTRA_ATTRS
+    fn attr_spec(&self) -> &'static [AttrSpec] {
+        &ATTR_SPEC
     }
 
     fn git_url(&self, parsed: &ParsedAttrs) -> Option<String> {
@@ -100,6 +99,12 @@ impl Forge for SourceHut {
             "https://{}.{}/{}/{}/archive/{}.tar.gz",
             vc, domain, owner, repo, rev
         ))
+    }
+}
+
+impl FlakeForge for SourceHut {
+    fn flake_scheme(&self) -> &'static str {
+        "sourcehut"
     }
 
     fn remote_url_for_flake(&self, owner: &str, repo: &str) -> String {

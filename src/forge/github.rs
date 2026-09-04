@@ -1,8 +1,9 @@
 use anyhow::{Context, Result};
 
 use crate::parser::{AttrSpec, AttrType, ParsedAttrs};
+use std::sync::LazyLock;
 
-use super::Forge;
+use super::{FlakeForge, Forge};
 
 pub struct GitHub;
 
@@ -21,6 +22,8 @@ const EXTRA_ATTRS: &[AttrSpec] = &[
     },
 ];
 
+static ATTR_SPEC: LazyLock<Vec<AttrSpec>> = LazyLock::new(|| super::compose_attr_spec(EXTRA_ATTRS));
+
 impl Forge for GitHub {
     fn id(&self) -> &'static str {
         "github"
@@ -30,12 +33,8 @@ impl Forge for GitHub {
         "fetchFromGitHub"
     }
 
-    fn flake_scheme(&self) -> Option<&'static str> {
-        Some("github")
-    }
-
-    fn extra_attrs(&self) -> &'static [AttrSpec] {
-        EXTRA_ATTRS
+    fn attr_spec(&self) -> &'static [AttrSpec] {
+        &ATTR_SPEC
     }
 
     fn git_url(&self, parsed: &ParsedAttrs) -> Option<String> {
@@ -75,6 +74,12 @@ impl Forge for GitHub {
             "https://{}/{}/{}/archive/{}.tar.gz",
             base, owner, repo, rev
         ))
+    }
+}
+
+impl FlakeForge for GitHub {
+    fn flake_scheme(&self) -> &'static str {
+        "github"
     }
 
     fn remote_url_for_flake(&self, owner: &str, repo: &str) -> String {

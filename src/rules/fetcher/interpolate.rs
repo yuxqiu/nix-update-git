@@ -66,7 +66,7 @@ pub(crate) fn parse_fetcher_attrset(
     } else {
         Some(&spec.ident_vars)
     };
-    let parsed = attr_set.parse_attrs(&kind.attr_spec(), ident_vars_opt)?;
+    let parsed = attr_set.parse_attrs(kind.attr_spec(), ident_vars_opt)?;
 
     let mut interpolated = HashMap::new();
     let mut interpolated_unresolved = Vec::new();

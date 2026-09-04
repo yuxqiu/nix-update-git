@@ -28,8 +28,8 @@ use crate::parser::{AttrSpec, AttrType, ParsedAttrs};
 
 /// Attribute keys shared by every forge's fetcher call (`fetchFromGitHub`,
 /// `fetchFromGitLab`, ...): everything except the keys that identify
-/// *which* repo (owner/repo/domain-ish), which each forge lists in
-/// `extra_attrs()`.
+/// *which* repo (owner/repo/domain-ish), which each forge composes in via
+/// `compose_attr_spec()`.
 pub const COMMON_GIT_ATTRS: &[AttrSpec] = &[
     AttrSpec {
         key: "tag",
@@ -96,16 +96,6 @@ pub trait Forge: Sync {
     /// e.g. `"fetchFromGitHub"`.
     fn nixpkgs_fn_name(&self) -> &'static str;
 
-    /// The flake input URL scheme this forge supports (`github:owner/repo`
-    /// uses `"github"`), if any.
-    fn flake_scheme(&self) -> Option<&'static str> {
-        None
-    }
-
-    /// Attribute keys beyond `COMMON_GIT_ATTRS` — whatever identifies the
-    /// repo for this forge (owner/repo/domain-ish keys).
-    fn extra_attrs(&self) -> &'static [AttrSpec];
-
     /// HTTPS remote URL for `git ls-remote`, resolved from parsed
     /// fetcher/derivation attrs.
     fn git_url(&self, parsed: &ParsedAttrs) -> Option<String>;
@@ -117,28 +107,37 @@ pub trait Forge: Sync {
     /// hash strategy).
     fn archive_url(&self, parsed: &ParsedAttrs, rev: &str) -> Result<String>;
 
-    /// HTTPS remote URL for the `scheme:owner/repo` flake shorthand, which
-    /// carries no domain-override attrs. Only called when
-    /// `flake_scheme()` is `Some`.
-    fn remote_url_for_flake(&self, owner: &str, repo: &str) -> String {
-        let _ = (owner, repo);
-        unreachable!("{} has no flake scheme", self.id())
-    }
+    /// Full attribute schema: `COMMON_GIT_ATTRS` plus this forge's own
+    /// (owner/repo/domain-ish keys). Not a default method: each impl caches
+    /// its own composed spec in a `LazyLock` (via `compose_attr_spec`) so
+    /// this stays a zero-allocation `&'static` lookup rather than
+    /// reassembling the `Vec` on every call.
+    fn attr_spec(&self) -> &'static [AttrSpec];
+}
 
-    /// Same, for display. Only called when `flake_scheme()` is `Some`.
-    fn display_for_flake(&self, owner: &str, repo: &str) -> String {
-        let _ = (owner, repo);
-        unreachable!("{} has no flake scheme", self.id())
-    }
+/// Composes `COMMON_GIT_ATTRS` with a forge's own attrs. Each `Forge` impl
+/// calls this once, inside a `static ATTR_SPEC: LazyLock<Vec<AttrSpec>>`, to
+/// implement `attr_spec()` — see any forge module for the pattern.
+pub fn compose_attr_spec(extra: &'static [AttrSpec]) -> Vec<AttrSpec> {
+    COMMON_GIT_ATTRS.iter().chain(extra).cloned().collect()
+}
 
-    /// Full attribute schema: `COMMON_GIT_ATTRS` plus this forge's own.
-    fn attr_spec(&self) -> Vec<AttrSpec> {
-        COMMON_GIT_ATTRS
-            .iter()
-            .chain(self.extra_attrs())
-            .cloned()
-            .collect()
-    }
+/// A `Forge` that also supports the `scheme:owner/repo` flake input
+/// shorthand (`github:owner/repo`, `gitlab:owner/repo`, ...). A separate
+/// trait rather than optional `Forge` methods: only some forges support
+/// this, and callers that need it (`flake_input.rs`) should hold a
+/// `&dyn FlakeForge` so the methods are provably callable — no runtime
+/// check, no panic path for forges that don't support it.
+pub trait FlakeForge: Forge {
+    /// The scheme itself, e.g. `"github"` for `github:owner/repo`.
+    fn flake_scheme(&self) -> &'static str;
+
+    /// HTTPS remote URL for the flake shorthand, which carries no
+    /// domain-override attrs (unlike `Forge::git_url`).
+    fn remote_url_for_flake(&self, owner: &str, repo: &str) -> String;
+
+    /// Same, for display.
+    fn display_for_flake(&self, owner: &str, repo: &str) -> String;
 }
 
 /// All registered forges. Adding one means implementing `Forge` in its own
@@ -155,15 +154,13 @@ pub const FORGES: &[&dyn Forge] = &[
     &gitiles::Gitiles,
 ];
 
+/// The subset of `FORGES` that also implement `FlakeForge`. `flake_input.rs`
+/// iterates this (not `FORGES`) to recognize `scheme:owner/repo` shorthand.
+pub const FLAKE_FORGES: &[&dyn FlakeForge] =
+    &[&github::GitHub, &gitlab::GitLab, &sourcehut::SourceHut];
+
 pub fn find_by_fn_name(name: &str) -> Option<&'static dyn Forge> {
     FORGES.iter().copied().find(|f| f.nixpkgs_fn_name() == name)
-}
-
-pub fn find_by_flake_scheme(scheme: &str) -> Option<&'static dyn Forge> {
-    FORGES
-        .iter()
-        .copied()
-        .find(|f| f.flake_scheme() == Some(scheme))
 }
 
 /// Normalizes an owner for forges (currently only SourceHut) that require a
@@ -185,4 +182,43 @@ pub(crate) fn strip_url_scheme(url: &str) -> &str {
         .or_else(|| url.strip_prefix("ssh://"))
         .or_else(|| url.strip_prefix("git://"))
         .unwrap_or(url)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use super::*;
+
+    /// `FetcherKind`'s `PartialEq` compares forges by `id()` string, and
+    /// `find_by_fn_name`/`find_by_scheme`-style lookups return the first
+    /// match — both silently misbehave if two registered forges share an
+    /// id or fetcher/scheme name (a copy-pasted new forge forgetting to
+    /// change one of these would compile fine and fail silently). Assert
+    /// uniqueness explicitly so that shows up as a test failure instead.
+    #[test]
+    fn test_forge_ids_are_unique() {
+        let ids: HashSet<&str> = FORGES.iter().map(|f| f.id()).collect();
+        assert_eq!(ids.len(), FORGES.len(), "duplicate Forge::id() in FORGES");
+    }
+
+    #[test]
+    fn test_forge_fn_names_are_unique() {
+        let names: HashSet<&str> = FORGES.iter().map(|f| f.nixpkgs_fn_name()).collect();
+        assert_eq!(
+            names.len(),
+            FORGES.len(),
+            "duplicate Forge::nixpkgs_fn_name() in FORGES"
+        );
+    }
+
+    #[test]
+    fn test_flake_forge_schemes_are_unique() {
+        let schemes: HashSet<&str> = FLAKE_FORGES.iter().map(|f| f.flake_scheme()).collect();
+        assert_eq!(
+            schemes.len(),
+            FLAKE_FORGES.len(),
+            "duplicate FlakeForge::flake_scheme() in FLAKE_FORGES"
+        );
+    }
 }

@@ -1,8 +1,9 @@
 use anyhow::{Context, Result};
 
 use crate::parser::{AttrSpec, AttrType, ParsedAttrs};
+use std::sync::LazyLock;
 
-use super::Forge;
+use super::{FlakeForge, Forge};
 
 pub struct GitLab;
 
@@ -21,6 +22,8 @@ const EXTRA_ATTRS: &[AttrSpec] = &[
     },
 ];
 
+static ATTR_SPEC: LazyLock<Vec<AttrSpec>> = LazyLock::new(|| super::compose_attr_spec(EXTRA_ATTRS));
+
 impl Forge for GitLab {
     fn id(&self) -> &'static str {
         "gitlab"
@@ -30,12 +33,8 @@ impl Forge for GitLab {
         "fetchFromGitLab"
     }
 
-    fn flake_scheme(&self) -> Option<&'static str> {
-        Some("gitlab")
-    }
-
-    fn extra_attrs(&self) -> &'static [AttrSpec] {
-        EXTRA_ATTRS
+    fn attr_spec(&self) -> &'static [AttrSpec] {
+        &ATTR_SPEC
     }
 
     fn git_url(&self, parsed: &ParsedAttrs) -> Option<String> {
@@ -78,6 +77,12 @@ impl Forge for GitLab {
             "https://{}/{}/{}/-/archive/{}/{}-{}.tar.gz",
             domain, owner, repo, rev, repo, rev
         ))
+    }
+}
+
+impl FlakeForge for GitLab {
+    fn flake_scheme(&self) -> &'static str {
+        "gitlab"
     }
 
     fn remote_url_for_flake(&self, owner: &str, repo: &str) -> String {

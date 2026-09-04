@@ -1,4 +1,4 @@
-use crate::forge::{self, Forge};
+use crate::forge::{self, FlakeForge};
 use crate::parser::{AttrSpec, AttrType, NixNode, TextRange};
 use crate::rules::traits::{CheckResult, CheckWarning, Update, UpdateGroup, UpdateRule};
 use crate::utils::{GitFetcher, VersionDetector};
@@ -17,12 +17,12 @@ const FLAKE_INPUT_ATTR_SPEC: &[AttrSpec] = &[
 
 #[derive(Clone)]
 enum FlakeUrl {
-    /// A `scheme:owner/repo` shorthand for a registered forge (`github:`,
-    /// `gitlab:`, `sourcehut:`, ...). Adding a forge with a
-    /// `flake_scheme()` makes it work here automatically — no variant or
-    /// match arm needed.
+    /// A `scheme:owner/repo` shorthand for a `FlakeForge` (`github:`,
+    /// `gitlab:`, `sourcehut:`, ...). Implementing `FlakeForge` and adding
+    /// it to `forge::FLAKE_FORGES` makes it work here automatically — no
+    /// variant or match arm needed.
     Forge {
-        forge: &'static dyn Forge,
+        forge: &'static dyn FlakeForge,
         owner: String,
         repo: String,
     },
@@ -102,10 +102,8 @@ impl FlakeInputRule {
     fn parse_flake_url(url: &str) -> Option<ParsedFlakeUrl> {
         let url = url.trim();
 
-        for &forge in forge::FORGES {
-            let Some(scheme) = forge.flake_scheme() else {
-                continue;
-            };
+        for &forge in forge::FLAKE_FORGES {
+            let scheme = forge.flake_scheme();
             let Some(rest) = url.strip_prefix(scheme).and_then(|r| r.strip_prefix(':')) else {
                 continue;
             };
@@ -197,7 +195,7 @@ impl FlakeInputRule {
         match &parsed.flake_url {
             FlakeUrl::Forge { forge, owner, repo } => Some(format!(
                 "{}:{}/{}?{}",
-                forge.flake_scheme().expect("parsed via a flake scheme"),
+                forge.flake_scheme(),
                 owner,
                 repo,
                 query
