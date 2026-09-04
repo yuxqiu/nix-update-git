@@ -63,23 +63,52 @@ enum Answer {
     Quit,
 }
 
+fn parse_answer(input: &str) -> Option<Answer> {
+    match input.trim().to_lowercase().as_str() {
+        "y" => Some(Answer::Yes),
+        "n" | "" => Some(Answer::No),
+        "a" => Some(Answer::All),
+        "q" => Some(Answer::Quit),
+        _ => None,
+    }
+}
+
 fn prompt() -> Answer {
     loop {
         print!("Apply this hunk? [y,n,a,q,?] ");
         io::stdout().flush().ok();
         let mut input = String::new();
-        io::stdin().read_line(&mut input).ok();
-        match input.trim().to_lowercase().as_str() {
-            "y" => return Answer::Yes,
-            "n" | "" => return Answer::No,
-            "a" => return Answer::All,
-            "q" => return Answer::Quit,
-            _ => {
-                println!("y - apply this hunk");
-                println!("n - skip this hunk");
-                println!("a - apply this hunk and all remaining hunks");
-                println!("q - quit; apply nothing further");
-            }
+        // `read_line` returning 0 bytes means stdin hit EOF (e.g. a
+        // non-interactive invocation): quit rather than looping forever
+        // re-interpreting an empty read as "skip this hunk".
+        let bytes_read = io::stdin().read_line(&mut input).unwrap_or(0);
+        if bytes_read == 0 {
+            return Answer::Quit;
         }
+        if let Some(answer) = parse_answer(&input) {
+            return answer;
+        }
+        println!("y - apply this hunk");
+        println!("n - skip this hunk");
+        println!("a - apply this hunk and all remaining hunks");
+        println!("q - quit; apply nothing further");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_answer() {
+        assert!(matches!(parse_answer("y"), Some(Answer::Yes)));
+        assert!(matches!(parse_answer("Y"), Some(Answer::Yes)));
+        assert!(matches!(parse_answer("n"), Some(Answer::No)));
+        assert!(matches!(parse_answer(""), Some(Answer::No)));
+        assert!(matches!(parse_answer("\n"), Some(Answer::No)));
+        assert!(matches!(parse_answer("a"), Some(Answer::All)));
+        assert!(matches!(parse_answer("q"), Some(Answer::Quit)));
+        assert!(parse_answer("?").is_none());
+        assert!(parse_answer("x").is_none());
     }
 }

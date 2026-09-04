@@ -130,3 +130,42 @@ pub fn build_registry(requested: &[String]) -> RuleRegistry {
     }
     registry
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    /// `build_registry` matches by string equality against `RuleDescriptor::id`,
+    /// so a copy-pasted duplicate id would silently double-register a rule
+    /// (double-run `check`, duplicate/overlapping `Update`s) instead of
+    /// failing to compile. Assert uniqueness explicitly, mirroring
+    /// `forge::tests::test_forge_ids_are_unique`.
+    #[test]
+    fn test_rule_ids_are_unique() {
+        let ids: HashSet<&str> = RULES.iter().map(|r| r.id).collect();
+        assert_eq!(
+            ids.len(),
+            RULES.len(),
+            "duplicate RuleDescriptor::id in RULES"
+        );
+    }
+
+    #[test]
+    fn test_build_registry_all_enables_every_rule() {
+        let registry = build_registry(&[ALL_RULES_SENTINEL.to_string()]);
+        assert_eq!(registry.len(), RULES.len());
+    }
+
+    #[test]
+    fn test_build_registry_unknown_id_is_a_no_op() {
+        let registry = build_registry(&["not-a-real-rule".to_string()]);
+        assert_eq!(registry.len(), 0);
+    }
+
+    #[test]
+    fn test_build_registry_selects_only_requested_rules() {
+        let registry = build_registry(&["flake".to_string()]);
+        assert_eq!(registry.len(), 1);
+    }
+}

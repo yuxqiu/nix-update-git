@@ -61,6 +61,43 @@ fn apply_and_report(path: &Path, content: &str, updates: &[Update]) -> bool {
     }
 }
 
+/// `--update --interactive`: prompt hunk-by-hunk, then apply only the
+/// accepted updates. Returns `true` if any file failed to write.
+fn run_interactive(file_results: &[FileResult]) -> bool {
+    let diffs: Vec<FileDiff> = file_results.iter().map(FileDiff::from_result).collect();
+    let selections = interactive::select(&diffs);
+    let mut had_errors = false;
+    for (fr, to_apply) in file_results.iter().zip(selections) {
+        if !apply_and_report(&fr.file_path, &fr.content, &to_apply) {
+            had_errors = true;
+        }
+    }
+    had_errors
+}
+
+/// Default (non-interactive) mode: render each file's diff, and apply every
+/// update when `--update` is set. Returns `true` if any file failed to
+/// write.
+fn run_default(file_results: &[FileResult], cli: &nix_update_git::cli::Cli) -> bool {
+    let mut had_errors = false;
+    for fr in file_results {
+        let diff = FileDiff::from_result(fr);
+        match render(&diff, cli.verbose) {
+            Some(text) => println!("{text}"),
+            None if cli.verbose => println!("{}: No updates found", fr.file_path.display()),
+            None => {}
+        }
+
+        if cli.update {
+            let to_apply = fr.all_updates();
+            if !apply_and_report(&fr.file_path, &fr.content, &to_apply) {
+                had_errors = true;
+            }
+        }
+    }
+    had_errors
+}
+
 fn main() -> Result<()> {
     let cli = nix_update_git::cli::Cli::parse();
 
@@ -72,7 +109,7 @@ fn main() -> Result<()> {
         anyhow::bail!("--check and --update are mutually exclusive.");
     }
 
-    let files = expand_inputs(cli.files_or_directories);
+    let files = expand_inputs(cli.files_or_directories.clone());
 
     if files.is_empty() {
         anyhow::bail!("No .nix files found in the provided inputs.");
@@ -105,31 +142,12 @@ fn main() -> Result<()> {
         }
     }
 
-    if cli.update && cli.interactive {
-        let diffs: Vec<FileDiff> = file_results.iter().map(FileDiff::from_result).collect();
-        let selections = interactive::select(&diffs);
-        for (fr, to_apply) in file_results.iter().zip(selections) {
-            if !apply_and_report(&fr.file_path, &fr.content, &to_apply) {
-                had_errors = true;
-            }
-        }
+    let run_had_errors = if cli.update && cli.interactive {
+        run_interactive(&file_results)
     } else {
-        for fr in &file_results {
-            let diff = FileDiff::from_result(fr);
-            match render(&diff, cli.verbose) {
-                Some(text) => println!("{text}"),
-                None if cli.verbose => println!("{}: No updates found", fr.file_path.display()),
-                None => {}
-            }
-
-            if cli.update {
-                let to_apply = fr.all_updates();
-                if !apply_and_report(&fr.file_path, &fr.content, &to_apply) {
-                    had_errors = true;
-                }
-            }
-        }
-    }
+        run_default(&file_results, &cli)
+    };
+    had_errors |= run_had_errors;
 
     if had_errors {
         std::process::exit(1);

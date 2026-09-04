@@ -26,21 +26,30 @@ pub struct GitRef {
     pub full_ref: String,
 }
 
-impl GitFetcher {
-    pub fn list_refs(url: &str, ref_types: &[RefType]) -> Result<Vec<GitRef>> {
-        let mut args = vec!["ls-remote".to_string()];
-        for rt in ref_types {
-            match rt {
-                RefType::Tags => {
-                    args.push("--tags".to_string());
-                    args.push("--refs".to_string());
-                }
-                RefType::Heads => {
-                    args.push("--heads".to_string());
-                }
+/// Builds `git ls-remote` args, terminated with `--` before the URL so a
+/// URL/path starting with `-` (e.g. a malicious `git+file://-upload-pack=...`
+/// flake input) can never be parsed as a flag by git.
+fn build_ls_remote_args(ref_types: &[RefType], url: &str) -> Vec<String> {
+    let mut args = vec!["ls-remote".to_string()];
+    for rt in ref_types {
+        match rt {
+            RefType::Tags => {
+                args.push("--tags".to_string());
+                args.push("--refs".to_string());
+            }
+            RefType::Heads => {
+                args.push("--heads".to_string());
             }
         }
-        args.push(url.to_string());
+    }
+    args.push("--".to_string());
+    args.push(url.to_string());
+    args
+}
+
+impl GitFetcher {
+    pub fn list_refs(url: &str, ref_types: &[RefType]) -> Result<Vec<GitRef>> {
+        let args = build_ls_remote_args(ref_types, url);
 
         let output = Command::new("git")
             .args(&args)
@@ -128,5 +137,34 @@ impl GitFetcher {
             .filter(|r| r.kind == RefKind::Tag)
             .map(|r| (r.name, r.sha))
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_ls_remote_args_separates_url_from_flags() {
+        let args = build_ls_remote_args(&[RefType::Tags], "--upload-pack=touch /tmp/pwned");
+        assert_eq!(
+            args,
+            vec![
+                "ls-remote",
+                "--tags",
+                "--refs",
+                "--",
+                "--upload-pack=touch /tmp/pwned",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_build_ls_remote_args_normal_url() {
+        let args = build_ls_remote_args(&[RefType::Heads], "https://example.com/repo.git");
+        assert_eq!(
+            args,
+            vec!["ls-remote", "--heads", "--", "https://example.com/repo.git"]
+        );
     }
 }

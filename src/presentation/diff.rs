@@ -26,6 +26,13 @@ pub struct LineChange {
     pub new: String,
 }
 
+/// Strips control characters (including the ESC byte that starts ANSI/CSI
+/// escape sequences) from text that ultimately originates from the nix file
+/// or an upstream git remote, before it reaches a terminal.
+fn sanitize(s: &str) -> String {
+    s.chars().filter(|c| !c.is_control()).collect()
+}
+
 impl FileDiff {
     pub fn from_result(fr: &FileResult) -> Self {
         let hunks = fr
@@ -39,13 +46,13 @@ impl FileDiff {
                         .iter()
                         .map(|u| LineChange {
                             field: u.field.clone(),
-                            old: fr.content[u.range.start..u.range.end].to_string(),
-                            new: u.replacement.clone(),
+                            old: sanitize(&fr.content[u.range.start..u.range.end]),
+                            new: sanitize(&u.replacement),
                         })
                         .collect();
                     Hunk {
                         rule_name: rule_name.clone(),
-                        target,
+                        target: target.map(|t| sanitize(&t)),
                         changes,
                         updates: group.updates.clone(),
                     }
@@ -57,5 +64,17 @@ impl FileDiff {
             path: fr.file_path.clone(),
             hunks,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_strips_escape_and_control_chars() {
+        assert_eq!(sanitize("v1.0\u{1b}[31mFAKE\u{1b}[0m"), "v1.0[31mFAKE[0m");
+        assert_eq!(sanitize("plain-value"), "plain-value");
+        assert_eq!(sanitize("has\ttab\nand\rcr"), "hastabandcr");
     }
 }

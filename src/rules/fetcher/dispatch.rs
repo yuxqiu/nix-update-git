@@ -11,6 +11,18 @@ use super::hashing::{try_prefetch_empty_hash, try_prefetch_hash};
 use super::kind::FetcherKind;
 use super::{source_url, version_ref_key_and_value};
 
+/// The attr key that carries the commit-ish for `call`: `rev` when present,
+/// otherwise `ref` for `builtins.fetchGit`, else `rev` (the common default).
+fn ref_key(call: &FetcherCall) -> &'static str {
+    if call.parsed().strings.contains_key("rev") {
+        "rev"
+    } else if call.kind() == FetcherKind::BuiltinsFetchGit {
+        "ref"
+    } else {
+        "rev"
+    }
+}
+
 fn handle_following(
     call: &FetcherCall,
     git_url: &str,
@@ -35,15 +47,7 @@ fn handle_following(
         return (None, ws);
     }
 
-    let ref_key = if call.parsed().strings.contains_key("rev") {
-        "rev"
-    } else if call.kind() == FetcherKind::BuiltinsFetchGit {
-        "ref"
-    } else {
-        "rev"
-    };
-
-    if call.parsed().string_range(ref_key).is_some() {
+    if call.parsed().string_range(ref_key(call)).is_some() {
         (Some(new_sha.clone()), ws)
     } else {
         (None, ws)
@@ -95,21 +99,14 @@ pub(super) fn check_fetcher_call(call: &FetcherCall) -> CheckResult {
             if let Some(spec) = spec {
                 let (new_sha, ws) = handle_following(call, &git_url, &spec);
                 warnings.extend(ws);
-                if let Some(sha) = &new_sha {
-                    let ref_key = if call.parsed().strings.contains_key("rev") {
-                        "rev"
-                    } else if call.kind() == FetcherKind::BuiltinsFetchGit {
-                        "ref"
-                    } else {
-                        "rev"
-                    };
-                    if let Some(range) = call.parsed().string_range(ref_key) {
-                        updates.push(Update::new(
-                            format!("{}.rev", call.kind().name()),
-                            format!("\"{}\"", sha),
-                            range,
-                        ));
-                    }
+                if let Some(sha) = &new_sha
+                    && let Some(range) = call.parsed().string_range(ref_key(call))
+                {
+                    updates.push(Update::new(
+                        format!("{}.rev", call.kind().name()),
+                        format!("\"{}\"", sha),
+                        range,
+                    ));
                 }
                 version_updated_rev = new_sha;
             }
@@ -176,42 +173,43 @@ pub(super) fn check_fetchpatch_call(call: &FetcherCall) -> CheckResult {
 
     let parsed_url = source_url::parse_patch_url(&url);
 
-    if let Some(follow_str) = call.follow() {
-        let (spec, ws) = parse_follow_spec(follow_str);
-        warnings.extend(ws);
-        if let Some(spec) = spec
-            && let Some(parsed) = &parsed_url
-        {
-            let git_url = parsed.git_remote_url();
-            let (result, ws) = resolve_follow(&spec, &git_url);
+    if !call.pinned() {
+        if let Some(follow_str) = call.follow() {
+            let (spec, ws) = parse_follow_spec(follow_str);
             warnings.extend(ws);
-            if let Some(result) = result {
-                let current_ref = parsed.current_ref();
-                if current_ref != result.sha {
-                    current_url = parsed.replace_ref(&result.sha);
-                    url_changed = true;
+            if let Some(spec) = spec
+                && let Some(parsed) = &parsed_url
+            {
+                let git_url = parsed.git_remote_url();
+                let (result, ws) = resolve_follow(&spec, &git_url);
+                warnings.extend(ws);
+                if let Some(result) = result {
+                    let current_ref = parsed.current_ref();
+                    if current_ref != result.sha {
+                        current_url = parsed.replace_ref(&result.sha);
+                        url_changed = true;
+                    }
                 }
             }
-        }
-    } else if !call.pinned()
-        && let Some(parsed) = &parsed_url
-        && parsed.is_version_ref()
-    {
-        let git_url = parsed.git_remote_url();
-        let current = parsed.current_ref();
-        match GitFetcher::get_latest_tag_matching(&git_url, Some(current)) {
-            Ok(Some(latest))
-                if VersionDetector::compare(current, &latest) == std::cmp::Ordering::Less =>
-            {
-                current_url = parsed.replace_ref(&latest);
-                url_changed = true;
-            }
-            Ok(_) => {}
-            Err(e) => {
-                warnings.push(CheckWarning::FollowResolutionFailed {
-                    git_url: git_url.clone(),
-                    source: e,
-                });
+        } else if let Some(parsed) = &parsed_url
+            && parsed.is_version_ref()
+        {
+            let git_url = parsed.git_remote_url();
+            let current = parsed.current_ref();
+            match GitFetcher::get_latest_tag_matching(&git_url, Some(current)) {
+                Ok(Some(latest))
+                    if VersionDetector::compare(current, &latest) == std::cmp::Ordering::Less =>
+                {
+                    current_url = parsed.replace_ref(&latest);
+                    url_changed = true;
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    warnings.push(CheckWarning::FollowResolutionFailed {
+                        git_url: git_url.clone(),
+                        source: e,
+                    });
+                }
             }
         }
     }
@@ -407,42 +405,43 @@ pub(super) fn check_fetchtarball_call(call: &FetcherCall) -> CheckResult {
 
     let parsed_url = source_url::parse_source_url(&url);
 
-    if let Some(follow_str) = call.follow() {
-        let (spec, ws) = parse_follow_spec(follow_str);
-        warnings.extend(ws);
-        if let Some(spec) = spec
-            && let Some(parsed) = &parsed_url
-        {
-            let git_url = parsed.git_remote_url();
-            let (result, ws) = resolve_follow(&spec, &git_url);
+    if !call.pinned() {
+        if let Some(follow_str) = call.follow() {
+            let (spec, ws) = parse_follow_spec(follow_str);
             warnings.extend(ws);
-            if let Some(result) = result {
-                let current_ref = parsed.current_ref();
-                if current_ref != result.sha {
-                    current_url = parsed.replace_ref(&result.sha);
-                    url_changed = true;
+            if let Some(spec) = spec
+                && let Some(parsed) = &parsed_url
+            {
+                let git_url = parsed.git_remote_url();
+                let (result, ws) = resolve_follow(&spec, &git_url);
+                warnings.extend(ws);
+                if let Some(result) = result {
+                    let current_ref = parsed.current_ref();
+                    if current_ref != result.sha {
+                        current_url = parsed.replace_ref(&result.sha);
+                        url_changed = true;
+                    }
                 }
             }
-        }
-    } else if !call.pinned()
-        && let Some(parsed) = &parsed_url
-        && parsed.is_version_ref()
-    {
-        let git_url = parsed.git_remote_url();
-        let current = parsed.current_ref();
-        match GitFetcher::get_latest_tag_matching(&git_url, Some(current)) {
-            Ok(Some(latest))
-                if VersionDetector::compare(current, &latest) == std::cmp::Ordering::Less =>
-            {
-                current_url = parsed.replace_ref(&latest);
-                url_changed = true;
-            }
-            Ok(_) => {}
-            Err(e) => {
-                warnings.push(CheckWarning::FollowResolutionFailed {
-                    git_url: git_url.clone(),
-                    source: e,
-                });
+        } else if let Some(parsed) = &parsed_url
+            && parsed.is_version_ref()
+        {
+            let git_url = parsed.git_remote_url();
+            let current = parsed.current_ref();
+            match GitFetcher::get_latest_tag_matching(&git_url, Some(current)) {
+                Ok(Some(latest))
+                    if VersionDetector::compare(current, &latest) == std::cmp::Ordering::Less =>
+                {
+                    current_url = parsed.replace_ref(&latest);
+                    url_changed = true;
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    warnings.push(CheckWarning::FollowResolutionFailed {
+                        git_url: git_url.clone(),
+                        source: e,
+                    });
+                }
             }
         }
     }

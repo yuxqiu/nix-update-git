@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use crate::parser::NixNode;
-use crate::rules::fetcher::{is_commit_hash, resolve_ref_for_prefetch};
+use crate::rules::fetcher::{hashing::push_hash_updates, is_commit_hash, resolve_ref_for_prefetch};
 use crate::rules::traits::{CheckResult, CheckWarning, Update, UpdateGroup};
 use crate::utils::{GitFetcher, VersionDetector};
 
@@ -235,20 +235,12 @@ pub(super) fn check_derivation_call(rule_name: &str, call: &DerivationCall) -> C
             let result = compute_hash(&call.fetcher_kind(), call.fetcher_parsed(), &rev_for_hash);
             match result {
                 Ok(nar_hash) => {
-                    if let Some(range) = call.fetcher_parsed().string_range("hash") {
-                        updates.push(Update::new(
-                            format!("{}.hash", call.fetcher_kind().name()),
-                            format!("\"{}\"", nar_hash.sri),
-                            range,
-                        ));
-                    }
-                    if let Some(range) = call.fetcher_parsed().string_range("sha256") {
-                        updates.push(Update::new(
-                            format!("{}.sha256", call.fetcher_kind().name()),
-                            format!("\"{}\"", nar_hash.nix32),
-                            range,
-                        ));
-                    }
+                    push_hash_updates(
+                        call.fetcher_parsed(),
+                        call.fetcher_kind().name(),
+                        &nar_hash,
+                        &mut updates,
+                    );
                 }
                 Err(e) => {
                     warnings.push(CheckWarning::HashPrefetchFailed {

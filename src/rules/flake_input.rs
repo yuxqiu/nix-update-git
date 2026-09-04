@@ -61,14 +61,7 @@ impl FlakeUrl {
     fn display_target(&self) -> String {
         match self {
             FlakeUrl::Forge { forge, owner, repo } => forge.display_for_flake(owner, repo),
-            // strip url prefix only
-            FlakeUrl::GitRemote { url } => url
-                .strip_prefix("https://")
-                .or_else(|| url.strip_prefix("http://"))
-                .or_else(|| url.strip_prefix("ssh://"))
-                .or_else(|| url.strip_prefix("git://"))
-                .unwrap_or(url)
-                .to_string(),
+            FlakeUrl::GitRemote { url } => forge::strip_url_scheme(url).to_string(),
             FlakeUrl::GitLocal { path } => path.clone(),
         }
     }
@@ -689,11 +682,26 @@ mod tests {
 
     #[test]
     fn test_gitlocal_to_remote_url() {
-        let result = FlakeInputRule::parse_flake_url("git+file:///tmp/repo");
-        assert!(result.is_some());
-        if let Some(parsed) = result {
-            assert!(parsed.flake_url.to_remote_url().is_some());
-        }
+        let result = FlakeInputRule::parse_flake_url("git+file:///tmp/repo").unwrap();
+        assert_eq!(
+            result.flake_url.to_remote_url(),
+            Some("/tmp/repo".to_string())
+        );
+    }
+
+    #[test]
+    fn test_gitlocal_dash_prefixed_path_is_preserved_verbatim() {
+        // Regression test: a path starting with `-` must reach
+        // `GitFetcher`/`git ls-remote` unmodified so the `--` separator
+        // added in `utils::fetch::build_ls_remote_args` is the only thing
+        // standing between this and git argument injection (see that
+        // module's tests). This test just pins down that parsing doesn't
+        // strip or reorder anything that would defeat that guard.
+        let result = FlakeInputRule::parse_flake_url("git+file://-upload-pack=evil").unwrap();
+        assert_eq!(
+            result.flake_url.to_remote_url(),
+            Some("-upload-pack=evil".to_string())
+        );
     }
 
     #[test]

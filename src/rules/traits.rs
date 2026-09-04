@@ -172,6 +172,14 @@ impl RuleRegistry {
         self.rules.push(rule);
     }
 
+    pub fn len(&self) -> usize {
+        self.rules.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.rules.is_empty()
+    }
+
     pub fn check_all(
         &self,
         root: &NixNode,

@@ -54,14 +54,42 @@ impl Forge for Bitbucket {
             .strings
             .get("repo")
             .context("missing 'repo' parameter for fetchFromBitbucket")?;
-        let rev_or_tag = if parsed.strings.contains_key("tag") {
-            format!("refs/tags/{}", rev)
-        } else {
-            rev.to_string()
-        };
         Ok(format!(
             "https://bitbucket.org/{}/{}/get/{}.tar.gz",
-            owner, repo, rev_or_tag
+            owner,
+            repo,
+            super::tag_or_rev(parsed, rev)
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn attrs(pairs: &[(&str, &str)]) -> ParsedAttrs {
+        let mut parsed = ParsedAttrs::default();
+        for (k, v) in pairs {
+            parsed.strings.insert(k.to_string(), v.to_string());
+        }
+        parsed
+    }
+
+    #[test]
+    fn test_archive_url_uses_bare_rev_without_tag() {
+        let parsed = attrs(&[("owner", "foo"), ("repo", "bar")]);
+        assert_eq!(
+            Bitbucket.archive_url(&parsed, "abc123").unwrap(),
+            "https://bitbucket.org/foo/bar/get/abc123.tar.gz"
+        );
+    }
+
+    #[test]
+    fn test_archive_url_uses_refs_tags_path_with_tag() {
+        let parsed = attrs(&[("owner", "foo"), ("repo", "bar"), ("tag", "v1.0.0")]);
+        assert_eq!(
+            Bitbucket.archive_url(&parsed, "v1.0.0").unwrap(),
+            "https://bitbucket.org/foo/bar/get/refs/tags/v1.0.0.tar.gz"
+        );
     }
 }

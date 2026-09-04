@@ -48,11 +48,53 @@ impl Forge for Gitiles {
             .strings
             .get("url")
             .context("missing 'url' parameter for fetchFromGitiles")?;
-        let rev_or_tag = if parsed.strings.contains_key("tag") {
-            format!("refs/tags/{}", rev)
-        } else {
-            rev.to_string()
-        };
-        Ok(format!("{}/+archive/{}.tar.gz", base_url, rev_or_tag))
+        Ok(format!(
+            "{}/+archive/{}.tar.gz",
+            base_url,
+            super::tag_or_rev(parsed, rev)
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn attrs(pairs: &[(&str, &str)]) -> ParsedAttrs {
+        let mut parsed = ParsedAttrs::default();
+        for (k, v) in pairs {
+            parsed.strings.insert(k.to_string(), v.to_string());
+        }
+        parsed
+    }
+
+    #[test]
+    fn test_display_target_strips_scheme() {
+        let parsed = attrs(&[("url", "https://gerrit.googlesource.com/git-repo")]);
+        assert_eq!(
+            Gitiles.display_target(&parsed),
+            Some("gerrit.googlesource.com/git-repo".to_string())
+        );
+    }
+
+    #[test]
+    fn test_archive_url_uses_bare_rev_without_tag() {
+        let parsed = attrs(&[("url", "https://gerrit.googlesource.com/git-repo")]);
+        assert_eq!(
+            Gitiles.archive_url(&parsed, "abc123").unwrap(),
+            "https://gerrit.googlesource.com/git-repo/+archive/abc123.tar.gz"
+        );
+    }
+
+    #[test]
+    fn test_archive_url_uses_refs_tags_path_with_tag() {
+        let parsed = attrs(&[
+            ("url", "https://gerrit.googlesource.com/git-repo"),
+            ("tag", "v1.0.0"),
+        ]);
+        assert_eq!(
+            Gitiles.archive_url(&parsed, "v1.0.0").unwrap(),
+            "https://gerrit.googlesource.com/git-repo/+archive/refs/tags/v1.0.0.tar.gz"
+        );
     }
 }

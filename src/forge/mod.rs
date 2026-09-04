@@ -186,6 +186,17 @@ pub(crate) fn strip_url_scheme(url: &str) -> &str {
         .unwrap_or(url)
 }
 
+/// The path segment identifying `rev` in an archive URL: `refs/tags/<rev>`
+/// when the call pins by `tag` (some hosts require the full ref path for
+/// tag archives), otherwise the bare `rev`.
+pub(crate) fn tag_or_rev(parsed: &ParsedAttrs, rev: &str) -> String {
+    if parsed.strings.contains_key("tag") {
+        format!("refs/tags/{}", rev)
+    } else {
+        rev.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
@@ -222,5 +233,20 @@ mod tests {
             FLAKE_FORGES.len(),
             "duplicate FlakeForge::flake_scheme() in FLAKE_FORGES"
         );
+    }
+
+    #[test]
+    fn test_tag_or_rev_uses_bare_rev_without_tag_key() {
+        let parsed = ParsedAttrs::default();
+        assert_eq!(tag_or_rev(&parsed, "v1.0.0"), "v1.0.0");
+    }
+
+    #[test]
+    fn test_tag_or_rev_uses_refs_tags_path_with_tag_key() {
+        let mut parsed = ParsedAttrs::default();
+        parsed
+            .strings
+            .insert("tag".to_string(), "v1.0.0".to_string());
+        assert_eq!(tag_or_rev(&parsed, "v1.0.0"), "refs/tags/v1.0.0");
     }
 }

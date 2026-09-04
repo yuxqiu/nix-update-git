@@ -8,7 +8,7 @@ mod dispatch;
 mod extract;
 mod follow;
 pub mod git_fetch;
-mod hashing;
+pub(crate) mod hashing;
 mod interpolate;
 pub mod kind;
 pub mod source_url;
@@ -20,7 +20,10 @@ pub(crate) fn is_commit_hash(s: &str) -> bool {
     s.len() == 40 && s.chars().all(|c| c.is_ascii_hexdigit())
 }
 
-pub(crate) fn version_ref_key_and_value(
+/// Used only by `dispatch::check_fetcher_call`/`handle_version_update`,
+/// unlike its neighbors above, which `derivation/extract.rs` and
+/// `derivation/resolve.rs` also call.
+fn version_ref_key_and_value(
     kind: FetcherKind,
     parsed: &ParsedAttrs,
 ) -> Option<(&'static str, String)> {

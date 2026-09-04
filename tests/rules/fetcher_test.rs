@@ -662,6 +662,31 @@ fn test_fetcher_fetchpatch_pinned_no_version_update() {
 }
 
 #[test]
+fn test_fetcher_fetchpatch_pinned_ignores_follow() {
+    // `# pin` skips the call entirely (see README "Pinning"), including a
+    // `# follow:` directive on the same call — it must not attempt any
+    // follow resolution (and therefore emit no warning), not just skip the
+    // plain version-update path.
+    let nix_content = r#"{  patches = [ (fetchpatch { # pin
+    # follow:branch main
+    url = "https://github.com/owner/repo/commit/0000000000000000000000000000000000000000.patch";
+    hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  }) ];
+}"#;
+
+    let nix_dir = tempdir().unwrap();
+    let nix_path = nix_dir.path().join("test.nix");
+    fs::write(&nix_path, nix_content).unwrap();
+
+    let mut cmd = Command::cargo_bin("nix-update-git").unwrap();
+    cmd.arg("--verbose").arg(nix_path.to_str().unwrap());
+    cmd.assert()
+        .success()
+        .stdout(predicates::str::contains("No updates found"))
+        .stderr(predicates::str::is_empty());
+}
+
+#[test]
 fn test_fetcher_fetchpatch_follow_branch_with_sha_url() {
     // Verify that a fetchpatch with # follow:<branch> on a commit URL
     // produces an update for the url field.  Since we can't use a real

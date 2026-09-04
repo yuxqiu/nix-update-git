@@ -90,3 +90,72 @@ impl FlakeForge for GitHub {
         format!("github.com/{}/{}", owner, repo)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn attrs(pairs: &[(&str, &str)]) -> ParsedAttrs {
+        let mut parsed = ParsedAttrs::default();
+        for (k, v) in pairs {
+            parsed.strings.insert(k.to_string(), v.to_string());
+        }
+        parsed
+    }
+
+    #[test]
+    fn test_git_url_defaults_to_github_com() {
+        let parsed = attrs(&[("owner", "NixOS"), ("repo", "nixpkgs")]);
+        assert_eq!(
+            GitHub.git_url(&parsed),
+            Some("https://github.com/NixOS/nixpkgs".to_string())
+        );
+    }
+
+    #[test]
+    fn test_git_url_honors_custom_github_base() {
+        let parsed = attrs(&[
+            ("owner", "NixOS"),
+            ("repo", "nixpkgs"),
+            ("githubBase", "github.example.com"),
+        ]);
+        assert_eq!(
+            GitHub.git_url(&parsed),
+            Some("https://github.example.com/NixOS/nixpkgs".to_string())
+        );
+    }
+
+    #[test]
+    fn test_display_target_ignores_custom_github_base() {
+        // Preserved pre-refactor behavior: display always shows
+        // "github.com", even when `githubBase` points elsewhere.
+        let parsed = attrs(&[
+            ("owner", "NixOS"),
+            ("repo", "nixpkgs"),
+            ("githubBase", "github.example.com"),
+        ]);
+        assert_eq!(
+            GitHub.display_target(&parsed),
+            Some("github.com/NixOS/nixpkgs".to_string())
+        );
+    }
+
+    #[test]
+    fn test_archive_url_honors_custom_github_base() {
+        let parsed = attrs(&[
+            ("owner", "NixOS"),
+            ("repo", "nixpkgs"),
+            ("githubBase", "github.example.com"),
+        ]);
+        assert_eq!(
+            GitHub.archive_url(&parsed, "v1.0.0").unwrap(),
+            "https://github.example.com/NixOS/nixpkgs/archive/v1.0.0.tar.gz"
+        );
+    }
+
+    #[test]
+    fn test_archive_url_missing_owner_errors() {
+        let parsed = attrs(&[("repo", "nixpkgs")]);
+        assert!(GitHub.archive_url(&parsed, "v1.0.0").is_err());
+    }
+}

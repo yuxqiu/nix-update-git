@@ -93,3 +93,60 @@ impl FlakeForge for GitLab {
         format!("gitlab.com/{}/{}", owner, repo)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn attrs(pairs: &[(&str, &str)]) -> ParsedAttrs {
+        let mut parsed = ParsedAttrs::default();
+        for (k, v) in pairs {
+            parsed.strings.insert(k.to_string(), v.to_string());
+        }
+        parsed
+    }
+
+    #[test]
+    fn test_git_url_defaults_to_gitlab_com() {
+        let parsed = attrs(&[("owner", "foo"), ("repo", "bar")]);
+        assert_eq!(
+            GitLab.git_url(&parsed),
+            Some("https://gitlab.com/foo/bar".to_string())
+        );
+    }
+
+    #[test]
+    fn test_git_url_honors_self_hosted_domain() {
+        let parsed = attrs(&[
+            ("owner", "foo"),
+            ("repo", "bar"),
+            ("domain", "gitlab.example.com"),
+        ]);
+        assert_eq!(
+            GitLab.git_url(&parsed),
+            Some("https://gitlab.example.com/foo/bar".to_string())
+        );
+    }
+
+    #[test]
+    fn test_display_target_honors_self_hosted_domain() {
+        let parsed = attrs(&[
+            ("owner", "foo"),
+            ("repo", "bar"),
+            ("domain", "gitlab.example.com"),
+        ]);
+        assert_eq!(
+            GitLab.display_target(&parsed),
+            Some("gitlab.example.com/foo/bar".to_string())
+        );
+    }
+
+    #[test]
+    fn test_archive_url_shape() {
+        let parsed = attrs(&[("owner", "foo"), ("repo", "bar")]);
+        assert_eq!(
+            GitLab.archive_url(&parsed, "v1.0.0").unwrap(),
+            "https://gitlab.com/foo/bar/-/archive/v1.0.0/bar-v1.0.0.tar.gz"
+        );
+    }
+}
