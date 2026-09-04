@@ -7,10 +7,26 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use clap::Parser;
 use nix_update_git::checker::{FileResult, check_file};
+use nix_update_git::cli::ColorMode;
 use nix_update_git::presentation::{FileDiff, render};
 use nix_update_git::rules::{CheckWarning, Update, build_registry};
 use rayon::prelude::*;
 use walkdir::WalkDir;
+
+/// Resolves `--color` against `NO_COLOR`/`CLICOLOR`/`CLICOLOR_FORCE`/CI/TTY
+/// detection (via `anstream`), the same convention `git`/`ripgrep` use.
+/// `Auto` defers entirely to that detection; `Always`/`Never` force it.
+fn resolve_color(mode: ColorMode) -> bool {
+    match mode {
+        ColorMode::Always => anstream::ColorChoice::Always.write_global(),
+        ColorMode::Never => anstream::ColorChoice::Never.write_global(),
+        ColorMode::Auto => {}
+    }
+    matches!(
+        anstream::AutoStream::choice(&std::io::stdout()),
+        anstream::ColorChoice::Always | anstream::ColorChoice::AlwaysAnsi
+    )
+}
 
 fn expand_inputs(inputs: Vec<PathBuf>) -> Vec<PathBuf> {
     let mut result = Vec::new();
@@ -63,9 +79,9 @@ fn apply_and_report(path: &Path, content: &str, updates: &[Update]) -> bool {
 
 /// `--update --interactive`: prompt hunk-by-hunk, then apply only the
 /// accepted updates. Returns `true` if any file failed to write.
-fn run_interactive(file_results: &[FileResult]) -> bool {
+fn run_interactive(file_results: &[FileResult], color: bool) -> bool {
     let diffs: Vec<FileDiff> = file_results.iter().map(FileDiff::from_result).collect();
-    let selections = interactive::select(&diffs);
+    let selections = interactive::select(&diffs, color);
     let mut had_errors = false;
     for (fr, to_apply) in file_results.iter().zip(selections) {
         if !apply_and_report(&fr.file_path, &fr.content, &to_apply) {
@@ -78,11 +94,11 @@ fn run_interactive(file_results: &[FileResult]) -> bool {
 /// Default (non-interactive) mode: render each file's diff, and apply every
 /// update when `--update` is set. Returns `true` if any file failed to
 /// write.
-fn run_default(file_results: &[FileResult], cli: &nix_update_git::cli::Cli) -> bool {
+fn run_default(file_results: &[FileResult], cli: &nix_update_git::cli::Cli, color: bool) -> bool {
     let mut had_errors = false;
     for fr in file_results {
         let diff = FileDiff::from_result(fr);
-        match render(&diff, cli.verbose) {
+        match render(&diff, cli.verbose, color) {
             Some(text) => println!("{text}"),
             None if cli.verbose => println!("{}: No updates found", fr.file_path.display()),
             None => {}
@@ -142,10 +158,11 @@ fn main() -> Result<()> {
         }
     }
 
+    let color = resolve_color(cli.color);
     let run_had_errors = if cli.update && cli.interactive {
-        run_interactive(&file_results)
+        run_interactive(&file_results, color)
     } else {
-        run_default(&file_results, &cli)
+        run_default(&file_results, &cli, color)
     };
     had_errors |= run_had_errors;
 

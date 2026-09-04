@@ -114,11 +114,16 @@ Options:
   -u, --update            Perform updates
   -i, --interactive       Confirm each update
   -v, --verbose           Enable verbose output
+      --color <COLOR>     Colorize diff output [default: auto] [possible values: auto, always, never]
   -j, --jobs <N>          Number of parallel file processing jobs [default: 4]
   -r, --rules <RULES>...  Rules to enable [default: flake fetcher mk-derivation build-vim-plugin]
   -h, --help              Print help
   -V, --version           Print version
 ```
+
+`--color auto` (the default) colors `-`/`+` lines when stdout is a terminal and
+respects `NO_COLOR`/`CLICOLOR`/`CLICOLOR_FORCE`, the same convention `git` and
+`ripgrep` use.
 
 ## Documentation
 

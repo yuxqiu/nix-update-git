@@ -753,6 +753,8 @@ dependencies = [
 name = "nix-update-git"
 version = "0.6.4"
 dependencies = [
+ "anstream",
+ "anstyle",
  "anyhow",
  "assert_cmd",
  "bstr",

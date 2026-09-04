@@ -47,7 +47,8 @@ fn render_snapshot(nix_path: &Path, redact_fields: &HashSet<String>) -> Result<S
         }
     }
 
-    Ok(render(&diff, true).unwrap_or_default())
+    // color=false: snapshots are plain-text fixtures, not a color test.
+    Ok(render(&diff, true, false).unwrap_or_default())
 }
 
 /// Discover all `.nix` files under `data/`, sorted for deterministic order.

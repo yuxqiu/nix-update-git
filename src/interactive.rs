@@ -1,13 +1,14 @@
 use std::io::{self, Write};
 
-use nix_update_git::presentation::{FileDiff, Hunk};
+use nix_update_git::presentation::{FileDiff, Hunk, new_line, old_line};
 use nix_update_git::rules::Update;
 
 /// Walks every hunk across all files in order, prompting `[y,n,a,q,?]` for
 /// each — the same vocabulary as `git add -p`. Returns one `Vec<Update>` per
 /// input `FileDiff`, in the same order, containing only the accepted
-/// updates for that file.
-pub fn select(diffs: &[FileDiff]) -> Vec<Vec<Update>> {
+/// updates for that file. `- `/`+ ` lines are colored red/green when `color`
+/// is `true`.
+pub fn select(diffs: &[FileDiff], color: bool) -> Vec<Vec<Update>> {
     let mut result: Vec<Vec<Update>> = diffs.iter().map(|_| Vec::new()).collect();
 
     let hunks: Vec<(usize, &Hunk)> = diffs
@@ -38,8 +39,8 @@ pub fn select(diffs: &[FileDiff]) -> Vec<Vec<Update>> {
         );
         for change in &hunk.changes {
             println!("    {}", change.field);
-            println!("    - {}", change.old);
-            println!("    + {}", change.new);
+            println!("    {}", old_line(&format!("- {}", change.old), color));
+            println!("    {}", new_line(&format!("+ {}", change.new), color));
         }
 
         match prompt() {

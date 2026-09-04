@@ -1,7 +1,17 @@
-use clap::Parser;
 use clap::builder::PossibleValuesParser;
+use clap::{Parser, ValueEnum};
 
 use crate::rules::{default_rule_ids, rule_value_names};
+
+/// When to colorize diff output. Mirrors `git`/`ripgrep`'s `--color` values;
+/// `Auto` is resolved against `NO_COLOR`/terminal detection in `main.rs`.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ColorMode {
+    #[default]
+    Auto,
+    Always,
+    Never,
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "nix-update-git")]
@@ -26,6 +36,14 @@ pub struct Cli {
 
     #[arg(short, long, help = "Enable verbose output")]
     pub verbose: bool,
+
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = ColorMode::Auto,
+        help = "Colorize diff output"
+    )]
+    pub color: ColorMode,
 
     #[arg(
         short,

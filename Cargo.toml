@@ -54,6 +54,8 @@ bstr = "1"
 globset = "0.4"
 regex = "1"
 semver = "1"
+anstream = "1.0"
+anstyle = "1.0"
 
 [features]
 network-tests = []

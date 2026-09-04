@@ -340,10 +340,20 @@ impl FetcherKind {
     pub fn display_target(&self, parsed: &ParsedAttrs) -> Option<String> {
         match self {
             Self::Forge(forge) => forge.display_target(parsed),
-            Self::FetchPatch | Self::FetchTarball => parsed.strings.get("url").and_then(|url| {
-                let parsed = parse_source_url(url)?;
-                Some(format!("{}/{}", parsed.domain, parsed.project))
-            }),
+            Self::FetchPatch | Self::FetchTarball => {
+                let url = parsed.strings.get("url").cloned().or_else(|| {
+                    parsed
+                        .pure_string_list("urls")
+                        .and_then(|urls| urls.into_iter().next())
+                })?;
+                // Prefer the structured "domain/project" form for recognized
+                // hosts; fall back to the raw URL (still useful context) for
+                // self-hosted/unrecognized ones rather than showing nothing.
+                Some(parse_source_url(&url).map_or_else(
+                    || strip_url_scheme(&url).to_string(),
+                    |p| format!("{}/{}", p.domain, p.project),
+                ))
+            }
             Self::FetchGit | Self::BuiltinsFetchGit => parsed
                 .strings
                 .get("url")
@@ -787,5 +797,40 @@ mod tests {
             kind("fetchFromGitHub").hash_strategy(&params, false),
             HashStrategy::Git
         );
+    }
+
+    #[test]
+    fn test_fetchpatch_display_target_uses_domain_project_for_recognized_host() {
+        let mut params = ParsedAttrs::default();
+        params.strings.insert(
+            "url".to_string(),
+            "https://github.com/owner/repo/commit/abc123.patch".to_string(),
+        );
+        assert_eq!(
+            FetcherKind::FetchPatch.display_target(&params),
+            Some("github.com/owner/repo".to_string())
+        );
+    }
+
+    #[test]
+    fn test_fetchpatch_display_target_falls_back_to_raw_url_for_unrecognized_host() {
+        // Regression test: a self-hosted/unrecognized URL used to make
+        // display_target return None, silently dropping the hunk header
+        // instead of showing the URL as context.
+        let mut params = ParsedAttrs::default();
+        params.strings.insert(
+            "url".to_string(),
+            "https://patches.example.internal/some/weird/path.patch".to_string(),
+        );
+        assert_eq!(
+            FetcherKind::FetchPatch.display_target(&params),
+            Some("patches.example.internal/some/weird/path.patch".to_string())
+        );
+    }
+
+    #[test]
+    fn test_fetchtarball_display_target_none_without_any_url() {
+        let params = ParsedAttrs::default();
+        assert_eq!(FetcherKind::FetchTarball.display_target(&params), None);
     }
 }
