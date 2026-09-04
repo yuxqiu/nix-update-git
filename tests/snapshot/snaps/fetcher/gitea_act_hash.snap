@@ -3,16 +3,8 @@ source: tests/snapshot/main.rs
 expression: output_for_insta
 input_file: tests/snapshot/data/fetcher/gitea_act_hash.nix
 ---
-[
-  {
-    "rule": "fetcher",
-    "target": "gitea.com/gitea/act",
-    "field": "fetchFromGitea.hash",
-    "old": "\"\"",
-    "new": "\"sha256-wnERl1BSVqjpIdFR7J0zpmC16SH+RcR6lb4YexltM7M=\"",
-    "range": [
-      372,
-      374
-    ]
-  }
-]
+tests/snapshot/data/fetcher/gitea_act_hash.nix
+  [fetcher] gitea.com/gitea/act
+    fetchFromGitea.hash
+    - ""
+    + "sha256-wnERl1BSVqjpIdFR7J0zpmC16SH+RcR6lb4YexltM7M="

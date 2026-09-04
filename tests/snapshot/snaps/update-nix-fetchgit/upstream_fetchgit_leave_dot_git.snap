@@ -3,25 +3,11 @@ source: tests/snapshot/main.rs
 expression: output_for_insta
 input_file: tests/snapshot/data/update-nix-fetchgit/upstream_fetchgit_leave_dot_git.nix
 ---
-[
-  {
-    "rule": "fetcher",
-    "target": "github.com/expipiplus1/update-nix-fetchgit",
-    "field": "fetchgit.rev",
-    "old": "\"v0.2.1\"",
-    "range": [
-      200,
-      208
-    ]
-  },
-  {
-    "rule": "fetcher",
-    "target": "github.com/expipiplus1/update-nix-fetchgit",
-    "field": "fetchgit.sha256",
-    "old": "\"\"",
-    "range": [
-      223,
-      225
-    ]
-  }
-]
+tests/snapshot/data/update-nix-fetchgit/upstream_fetchgit_leave_dot_git.nix
+  [fetcher] github.com/expipiplus1/update-nix-fetchgit
+    fetchgit.rev
+    - "v0.2.1"
+    + <redacted>
+    fetchgit.sha256
+    - ""
+    + <redacted>

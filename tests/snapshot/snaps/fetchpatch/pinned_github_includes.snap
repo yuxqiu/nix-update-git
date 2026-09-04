@@ -3,16 +3,8 @@ source: tests/snapshot/main.rs
 expression: output_for_insta
 input_file: tests/snapshot/data/fetchpatch/pinned_github_includes.nix
 ---
-[
-  {
-    "rule": "fetcher",
-    "target": "github.com/yuxqiu/nix-update-git",
-    "field": "fetchpatch.hash",
-    "old": "\"\"",
-    "new": "\"sha256-WxdZtUQVjttjUndYn/AtGGREBbMQtsEPpCbqUnfgLfE=\"",
-    "range": [
-      743,
-      745
-    ]
-  }
-]
+tests/snapshot/data/fetchpatch/pinned_github_includes.nix
+  [fetcher] github.com/yuxqiu/nix-update-git
+    fetchpatch.hash
+    - ""
+    + "sha256-WxdZtUQVjttjUndYn/AtGGREBbMQtsEPpCbqUnfgLfE="

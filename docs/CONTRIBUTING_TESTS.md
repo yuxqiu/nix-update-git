@@ -49,13 +49,13 @@ Each `.nix` file in `data/` is registered as an individual test case (e.g. `fetc
 Nix files in `data/` are processed by the custom test harness in `tests/snapshot/main.rs`:
 
 - Each `.nix` file is discovered and registered as an individual test case via `libtest_mimic`
-- Each file is run through `nix-update-git --format json`
-- JSON output is parsed into `SnapshotEntry` structs (rule, field, old, new, range)
-- The result is snapshot under `snaps/<category>/<test_name>.snap`
+- Each file is checked in-process via `nix_update_git::checker::check_file` (the same default rule set the CLI uses), not by spawning the compiled binary
+- The result is converted to a `nix_update_git::presentation::FileDiff` and rendered with `render(&diff, verbose: true)` — the same diff-style text the CLI prints, with the rule name always included (the CLI itself only shows the rule name behind `--verbose`)
+- The rendered text is what gets snapshot under `snaps/<category>/<test_name>.snap`
 
-### Redacting Sensitive Values
+### Redacting Non-Deterministic Values
 
-Add a `# redact: field1 field2 ...` directive on the first line of the `.nix` file. Listed fields are omitted from the snapshot output. This allows selective redaction of non-deterministic fields like `new` and `range`.
+Add a `# redact: new` directive on the first line of the `.nix` file to replace every change's new value with a `<redacted>` placeholder in the snapshot — use this when the update depends on live upstream state (e.g. "latest tag") that can legitimately change between runs. `range` is accepted as a directive token for backward compatibility with older fixtures but has no effect: byte ranges aren't part of the rendered diff text at all.
 
 ### Disabling Flaky Tests
 

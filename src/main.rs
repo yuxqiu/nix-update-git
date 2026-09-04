@@ -1,26 +1,16 @@
-mod check;
-mod output;
+mod interactive;
 mod patch;
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use clap::Parser;
-use nix_update_git::cli::OutputFormat;
-use nix_update_git::rules::{
-    FetcherRule, FlakeInputRule, RuleRegistry, build_dune_package_rule,
-    build_emscripten_package_rule, build_gem_rule, build_go_module_rule,
-    build_haskell_package_rule, build_mix_package_rule, build_npm_package_rule,
-    build_python_package_rule, build_rebar3_release_rule, build_rust_package_rule,
-    build_vim_plugin_rule, mk_derivation_rule,
-};
+use nix_update_git::checker::{FileResult, check_file};
+use nix_update_git::presentation::{FileDiff, render};
+use nix_update_git::rules::{CheckWarning, Update, build_registry};
 use rayon::prelude::*;
 use walkdir::WalkDir;
-
-use check::check_file;
-use output::{UpdateEntry, print_json, print_updates, print_warnings, select_interactive};
-use patch::apply_updates;
 
 fn expand_inputs(inputs: Vec<PathBuf>) -> Vec<PathBuf> {
     let mut result = Vec::new();
@@ -46,6 +36,31 @@ fn expand_inputs(inputs: Vec<PathBuf>) -> Vec<PathBuf> {
     result
 }
 
+fn print_warnings(warnings: &[CheckWarning]) {
+    for warning in warnings {
+        eprintln!("Warning: {warning}");
+    }
+}
+
+/// Applies `updates` to `path` (if non-empty) and reports the result.
+/// Returns `false` if writing the file failed.
+fn apply_and_report(path: &Path, content: &str, updates: &[Update]) -> bool {
+    if updates.is_empty() {
+        return true;
+    }
+    let new_content = patch::apply_updates(content, updates, path);
+    match fs::write(path, &new_content) {
+        Ok(()) => {
+            println!("{}: Applied {} update(s)", path.display(), updates.len());
+            true
+        }
+        Err(e) => {
+            eprintln!("Error writing {}: {}", path.display(), e);
+            false
+        }
+    }
+}
+
 fn main() -> Result<()> {
     let cli = nix_update_git::cli::Cli::parse();
 
@@ -67,121 +82,53 @@ fn main() -> Result<()> {
         .num_threads(cli.jobs)
         .build_global()?;
 
-    let mut registry = RuleRegistry::new();
-    let rules = &cli.rules;
-    let rule_enabled = |name: &str| rules.iter().any(|r| r.is_enabled(name));
-
-    if rule_enabled("flake") {
-        registry.register(FlakeInputRule);
-    }
-    if rule_enabled("fetcher") {
-        registry.register(FetcherRule);
-    }
-    if rule_enabled("mk-derivation") {
-        registry.register(mk_derivation_rule());
-    }
-    if rule_enabled("build-vim-plugin") {
-        registry.register(build_vim_plugin_rule());
-    }
-    if rule_enabled("build-rust-package") {
-        registry.register(build_rust_package_rule());
-    }
-    if rule_enabled("build-go-module") {
-        registry.register(build_go_module_rule());
-    }
-    if rule_enabled("build-python-package") {
-        registry.register(build_python_package_rule());
-    }
-    if rule_enabled("build-dune-package") {
-        registry.register(build_dune_package_rule());
-    }
-    if rule_enabled("build-npm-package") {
-        registry.register(build_npm_package_rule());
-    }
-    if rule_enabled("build-mix-package") {
-        registry.register(build_mix_package_rule());
-    }
-    if rule_enabled("build-rebar3-release") {
-        registry.register(build_rebar3_release_rule());
-    }
-    if rule_enabled("build-gem") {
-        registry.register(build_gem_rule());
-    }
-    if rule_enabled("build-haskell-package") {
-        registry.register(build_haskell_package_rule());
-    }
-    if rule_enabled("build-emscripten-package") {
-        registry.register(build_emscripten_package_rule());
-    }
+    let registry = build_registry(&cli.rules);
 
     let results: Vec<_> = files.par_iter().map(|p| check_file(p, &registry)).collect();
 
     let mut had_errors = false;
-    let mut json_entries: Vec<UpdateEntry> = Vec::new();
+    let mut file_results: Vec<FileResult> = Vec::new();
 
     for result in results {
-        let fr = match result {
-            Ok(r) => r,
+        match result {
+            Ok(fr) => file_results.push(fr),
             Err(e) => {
                 eprintln!("{e}");
                 had_errors = true;
-                continue;
-            }
-        };
-
-        if !fr.warnings.is_empty() {
-            print_warnings(&fr.warnings);
-        }
-
-        if fr.updates_per_rule.is_empty() {
-            if cli.verbose && cli.format == OutputFormat::Text {
-                println!("{}: No updates found", fr.file_path.display());
-            }
-            continue;
-        }
-
-        match cli.format {
-            OutputFormat::Text => print_updates(&fr),
-            OutputFormat::Json => {
-                json_entries.extend(
-                    fr.all_updates()
-                        .iter()
-                        .map(|u| UpdateEntry::from_update(&fr.file_path, &fr.content, u)),
-                );
-            }
-        }
-
-        if cli.update {
-            let to_apply = if cli.interactive {
-                let groups = fr.all_groups();
-                select_interactive(&fr, &groups)
-            } else {
-                fr.all_updates()
-            };
-
-            if !to_apply.is_empty() {
-                let new_content = apply_updates(&fr.content, &to_apply, &fr.file_path);
-                match fs::write(&fr.file_path, &new_content) {
-                    Ok(()) => {
-                        if cli.format == OutputFormat::Text {
-                            println!(
-                                "{}: Applied {} update(s)",
-                                fr.file_path.display(),
-                                to_apply.len()
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Error writing {}: {}", fr.file_path.display(), e);
-                        had_errors = true;
-                    }
-                }
             }
         }
     }
 
-    if cli.format == OutputFormat::Json {
-        print_json(&json_entries);
+    for fr in &file_results {
+        if !fr.warnings.is_empty() {
+            print_warnings(&fr.warnings);
+        }
+    }
+
+    if cli.update && cli.interactive {
+        let diffs: Vec<FileDiff> = file_results.iter().map(FileDiff::from_result).collect();
+        let selections = interactive::select(&diffs);
+        for (fr, to_apply) in file_results.iter().zip(selections) {
+            if !apply_and_report(&fr.file_path, &fr.content, &to_apply) {
+                had_errors = true;
+            }
+        }
+    } else {
+        for fr in &file_results {
+            let diff = FileDiff::from_result(fr);
+            match render(&diff, cli.verbose) {
+                Some(text) => println!("{text}"),
+                None if cli.verbose => println!("{}: No updates found", fr.file_path.display()),
+                None => {}
+            }
+
+            if cli.update {
+                let to_apply = fr.all_updates();
+                if !apply_and_report(&fr.file_path, &fr.content, &to_apply) {
+                    had_errors = true;
+                }
+            }
+        }
     }
 
     if had_errors {

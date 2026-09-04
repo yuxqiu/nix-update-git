@@ -2,8 +2,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use nix_update_git::parser::NixFile;
-use nix_update_git::rules::{CheckWarning, RuleRegistry, Update, UpdateGroup};
+
+use crate::parser::NixFile;
+use crate::rules::{CheckWarning, RuleRegistry, Update, UpdateGroup};
 
 pub struct FileResult {
     pub file_path: PathBuf,

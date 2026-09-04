@@ -3,17 +3,11 @@ source: tests/snapshot/main.rs
 expression: output_for_insta
 input_file: tests/snapshot/data/fetchpatch/gitlab_compare_version_update.nix
 ---
-[
-  {
-    "rule": "fetcher",
-    "target": "gitlab.com/procps-ng/procps",
-    "field": "fetchpatch.url",
-    "old": "\"https://gitlab.com/procps-ng/procps/-/compare/v4.0.2...v4.0.3.patch\""
-  },
-  {
-    "rule": "fetcher",
-    "target": "gitlab.com/procps-ng/procps",
-    "field": "fetchpatch.hash",
-    "old": "\"\""
-  }
-]
+tests/snapshot/data/fetchpatch/gitlab_compare_version_update.nix
+  [fetcher] gitlab.com/procps-ng/procps
+    fetchpatch.url
+    - "https://gitlab.com/procps-ng/procps/-/compare/v4.0.2...v4.0.3.patch"
+    + <redacted>
+    fetchpatch.hash
+    - ""
+    + <redacted>

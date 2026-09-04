@@ -3,16 +3,8 @@ source: tests/snapshot/main.rs
 expression: output_for_insta
 input_file: tests/snapshot/data/fetchtarball/pinned_sourcehut_archive_empty_hash.nix
 ---
-[
-  {
-    "rule": "fetcher",
-    "target": "git.sr.ht/~sircmpwn/scdoc",
-    "field": "fetchTarball.sha256",
-    "old": "\"\"",
-    "new": "\"02rfwlaf64ck2qyz107jjmijcin9pnz4chjmbh5y051lzbmpl56l\"",
-    "range": [
-      293,
-      295
-    ]
-  }
-]
+tests/snapshot/data/fetchtarball/pinned_sourcehut_archive_empty_hash.nix
+  [fetcher] git.sr.ht/~sircmpwn/scdoc
+    fetchTarball.sha256
+    - ""
+    + "02rfwlaf64ck2qyz107jjmijcin9pnz4chjmbh5y051lzbmpl56l"

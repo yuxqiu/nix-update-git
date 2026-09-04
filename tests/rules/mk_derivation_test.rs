@@ -651,11 +651,13 @@ fn test_fetcher_excluded_from_lambda_wrapped_mk_derivation() {
     fs::write(&nix_path, &nix_content).unwrap();
 
     let mut cmd = Command::cargo_bin("nix-update-git").unwrap();
-    cmd.arg(nix_path.to_str().unwrap());
+    cmd.arg("--verbose").arg(nix_path.to_str().unwrap());
     let output = cmd.output().unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
     // The fetcher inside the lambda-wrapped mkDerivation should be
-    // handled by the mk-derivation rule, not the fetcher rule.
+    // handled by the mk-derivation rule, not the fetcher rule. --verbose
+    // surfaces which rule produced each change so this can be checked
+    // directly instead of relying on rule names leaking into default output.
     assert!(
         !stdout.contains("fetcher"),
         "Fetcher rule should not process src inside lambda-wrapped mkDerivation, got: {}",

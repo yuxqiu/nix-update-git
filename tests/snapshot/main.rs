@@ -2,26 +2,12 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use assert_cmd::Command;
 use libtest_mimic::{Arguments, Failed, Trial};
-use serde::Serialize;
+use nix_update_git::checker::check_file;
+use nix_update_git::cli::default_rules;
+use nix_update_git::presentation::{FileDiff, render};
+use nix_update_git::rules::build_registry;
 use walkdir::WalkDir;
-
-#[derive(Serialize, Debug)]
-pub struct SnapshotEntry {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rule: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub target: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub field: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub old: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub new: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub range: Option<[usize; 2]>,
-}
 
 fn parse_redact_directive(nix_path: &Path) -> HashSet<String> {
     let content = fs::read_to_string(nix_path).unwrap_or_default();
@@ -40,61 +26,27 @@ fn is_ignored(nix_path: &Path) -> bool {
     first_line.starts_with("# ignored")
 }
 
-fn run_json_check(file: &str) -> String {
-    let mut cmd = Command::cargo_bin("nix-update-git").unwrap();
-    cmd.arg("--format").arg("json").arg(file);
-    let output = cmd.output().unwrap();
-    String::from_utf8_lossy(&output.stdout).to_string()
-}
+/// Runs the checker in-process (the same rule set the CLI uses by default)
+/// and renders the result as diff text, redacting non-deterministic fields
+/// per the fixture's `# redact:` directive. `new` is the only field ever
+/// redacted in practice; `range` is no longer part of the rendered text at
+/// all, so a `# redact: ... range` directive is accepted but has nothing to
+/// do — it's a leftover from the JSON-based format this replaced.
+fn render_snapshot(nix_path: &Path, redact_fields: &HashSet<String>) -> Result<String, Failed> {
+    let registry = build_registry(&default_rules());
+    let fr = check_file(nix_path, &registry)
+        .map_err(|e| Failed::from(format!("check_file failed: {e}")))?;
+    let mut diff = FileDiff::from_result(&fr);
 
-fn parse_json(json: &str, redact_fields: &HashSet<String>) -> Vec<SnapshotEntry> {
-    let raw: Vec<serde_json::Value> = serde_json::from_str(json).unwrap_or_default();
-    raw.into_iter()
-        .map(|v| {
-            let rule = v["rule"].as_str().unwrap_or("").to_string();
-            let field = v["field"].as_str().unwrap_or("").to_string();
-            let old = v["old"].as_str().unwrap_or("").to_string();
-            let new = v["new"].as_str().unwrap_or("").to_string();
-            let range = [
-                v["range"][0].as_u64().unwrap_or(0) as usize,
-                v["range"][1].as_u64().unwrap_or(0) as usize,
-            ];
-            let target = v["target"].as_str().map(|s| s.to_string());
-
-            SnapshotEntry {
-                rule: if redact_fields.contains("rule") {
-                    None
-                } else {
-                    Some(rule)
-                },
-                field: if redact_fields.contains("field") {
-                    None
-                } else {
-                    Some(field)
-                },
-                old: if redact_fields.contains("old") {
-                    None
-                } else {
-                    Some(old)
-                },
-                new: if redact_fields.contains("new") {
-                    None
-                } else {
-                    Some(new)
-                },
-                range: if redact_fields.contains("range") {
-                    None
-                } else {
-                    Some(range)
-                },
-                target: if redact_fields.contains("target") {
-                    None
-                } else {
-                    target
-                },
+    if redact_fields.contains("new") {
+        for hunk in &mut diff.hunks {
+            for change in &mut hunk.changes {
+                change.new = "<redacted>".to_string();
             }
-        })
-        .collect()
+        }
+    }
+
+    Ok(render(&diff, true).unwrap_or_default())
 }
 
 /// Discover all `.nix` files under `data/`, sorted for deterministic order.
@@ -123,10 +75,15 @@ fn snapshot_dir_for(nix_path: &Path, data_dir: &Path) -> PathBuf {
 /// Run a single snapshot test for one `.nix` file.
 fn run_snapshot_test(nix_path: &Path, data_dir: &Path) -> Result<(), Failed> {
     let redact_fields = parse_redact_directive(nix_path);
-    let json_output = run_json_check(nix_path.to_str().unwrap());
-    let entries = parse_json(&json_output, &redact_fields);
-    let output_for_insta = serde_json::to_string_pretty(&entries)
-        .map_err(|e| Failed::from(format!("Failed to serialize snapshot: {e}")))?;
+
+    // Render using a path relative to the workspace root, not the absolute
+    // path `discover_nix_files` walks with — otherwise the snapshot bakes in
+    // a machine-specific absolute path. `cargo test` runs with the package
+    // root as its working directory, so the relative path still resolves.
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let relative_path = nix_path.strip_prefix(manifest_dir).unwrap_or(nix_path);
+
+    let output_for_insta = render_snapshot(relative_path, &redact_fields)?;
 
     let snap_dir = snapshot_dir_for(nix_path, data_dir);
     let snapshot_name = nix_path
@@ -136,12 +93,7 @@ fn run_snapshot_test(nix_path: &Path, data_dir: &Path) -> Result<(), Failed> {
 
     // Compute input_file metadata relative to the workspace root,
     // matching what `insta::glob!` sets automatically.
-    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let input_file = nix_path
-        .strip_prefix(manifest_dir)
-        .unwrap_or(nix_path)
-        .to_string_lossy()
-        .into_owned();
+    let input_file = relative_path.to_string_lossy().into_owned();
 
     insta::with_settings!({
         prepend_module_to_snapshot => false,

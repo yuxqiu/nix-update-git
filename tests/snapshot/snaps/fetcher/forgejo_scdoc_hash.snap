@@ -3,16 +3,8 @@ source: tests/snapshot/main.rs
 expression: output_for_insta
 input_file: tests/snapshot/data/fetcher/forgejo_scdoc_hash.nix
 ---
-[
-  {
-    "rule": "fetcher",
-    "target": "codeberg.org/ddevault/scdoc",
-    "field": "fetchFromForgejo.hash",
-    "old": "\"\"",
-    "new": "\"sha256-2NVC+1in1Yt6/XGcHXP+V4AAz8xW/hSq9ctF/Frdgh0=\"",
-    "range": [
-      396,
-      398
-    ]
-  }
-]
+tests/snapshot/data/fetcher/forgejo_scdoc_hash.nix
+  [fetcher] codeberg.org/ddevault/scdoc
+    fetchFromForgejo.hash
+    - ""
+    + "sha256-2NVC+1in1Yt6/XGcHXP+V4AAz8xW/hSq9ctF/Frdgh0="

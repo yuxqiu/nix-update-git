@@ -47,19 +47,26 @@ Options:
   -u, --update           Perform updates
   -i, --interactive      Confirm each update
   -v, --verbose          Enable verbose output
-      --format <FORMAT>  Output format [default: text] [possible values: text, json]
   -j, --jobs <N>         Number of parallel file processing jobs [default: 4]
-  -r, --rules <RULES>... Rules to enable [default: fetcher flake mk-derivation]
+  -r, --rules <RULES>... Rules to enable [default: fetcher flake mk-derivation build-vim-plugin]
   -h, --help             Print help
   -V, --version          Print version
 ```
 
 ### Check mode (default)
 
+Output reads as a diff — what would change, and where:
+
 ```bash
 nix-update-git flake.nix
-# flake.nix: Found 1 update(s) from rule 'flake-input':
-#   - inputs.mylib.ref: v1.0.0 -> v2.0.0
+```
+
+```
+flake.nix
+  github.com/foo/mylib
+    inputs.mylib.ref
+    - "v1.0.0"
+    + "v2.0.0"
 ```
 
 ### Update mode
@@ -76,32 +83,21 @@ nix-update-git flake.nix ./path/to/nix/
 
 ### Interactive mode
 
+Confirms each change one at a time, using the same `[y,n,a,q,?]` vocabulary as `git add -p`:
+
 ```bash
 nix-update-git --update --interactive flake.nix
 ```
 
-### JSON output
-
-```bash
-nix-update-git --format json flake.nix
+```
+Hunk 1/1 — flake.nix: github.com/foo/mylib
+    inputs.mylib.ref
+    - "v1.0.0"
+    + "v2.0.0"
+Apply this hunk? [y,n,a,q,?]
 ```
 
-Outputs machine-readable JSON:
-
-```json
-[
-  {
-    "file": "flake.nix",
-    "rule": "flake-input",
-    "field": "inputs.mylib.ref",
-    "old": "\"v1.0.0\"",
-    "new": "\"v2.0.0\"",
-    "range": [120, 128]
-  }
-]
-```
-
-Combine with `--update` to apply changes and get a JSON summary of what was updated.
+`y` applies just this hunk, `n` skips it, `a` applies it and every remaining hunk, `q` stops without applying anything further.
 
 ## Rules
 

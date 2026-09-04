@@ -3,16 +3,8 @@ source: tests/snapshot/main.rs
 expression: output_for_insta
 input_file: tests/snapshot/data/fetcher/gitlab_procps_hash.nix
 ---
-[
-  {
-    "rule": "fetcher",
-    "target": "gitlab.com/procps-ng/procps",
-    "field": "fetchFromGitLab.hash",
-    "old": "\"\"",
-    "new": "\"sha256-GVWLPd9wr3e94kEEJKmOk2ghXAFIB+BiSrK6Qzyr+uk=\"",
-    "range": [
-      383,
-      385
-    ]
-  }
-]
+tests/snapshot/data/fetcher/gitlab_procps_hash.nix
+  [fetcher] gitlab.com/procps-ng/procps
+    fetchFromGitLab.hash
+    - ""
+    + "sha256-GVWLPd9wr3e94kEEJKmOk2ghXAFIB+BiSrK6Qzyr+uk="

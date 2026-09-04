@@ -3,16 +3,8 @@ source: tests/snapshot/main.rs
 expression: output_for_insta
 input_file: tests/snapshot/data/fetchtarball/pinned_codeberg_archive_empty_hash_field.nix
 ---
-[
-  {
-    "rule": "fetcher",
-    "target": "codeberg.org/ddevault/scdoc",
-    "field": "fetchTarball.hash",
-    "old": "\"\"",
-    "new": "\"sha256-2NVC+1in1Yt6/XGcHXP+V4AAz8xW/hSq9ctF/Frdgh0=\"",
-    "range": [
-      306,
-      308
-    ]
-  }
-]
+tests/snapshot/data/fetchtarball/pinned_codeberg_archive_empty_hash_field.nix
+  [fetcher] codeberg.org/ddevault/scdoc
+    fetchTarball.hash
+    - ""
+    + "sha256-2NVC+1in1Yt6/XGcHXP+V4AAz8xW/hSq9ctF/Frdgh0="

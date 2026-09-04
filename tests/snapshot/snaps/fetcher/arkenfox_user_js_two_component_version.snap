@@ -3,25 +3,11 @@ source: tests/snapshot/main.rs
 expression: output_for_insta
 input_file: tests/snapshot/data/fetcher/arkenfox_user_js_two_component_version.nix
 ---
-[
-  {
-    "rule": "fetcher",
-    "target": "github.com/arkenfox/user.js",
-    "field": "fetchFromGitHub.rev",
-    "old": "\"140.0\"",
-    "range": [
-      103,
-      110
-    ]
-  },
-  {
-    "rule": "fetcher",
-    "target": "github.com/arkenfox/user.js",
-    "field": "fetchFromGitHub.hash",
-    "old": "\"sha256-LPDiiEPOZu5Ah5vCLyCMT3w1uoBhUjyqoPWCOiLVLnw=\"",
-    "range": [
-      123,
-      176
-    ]
-  }
-]
+tests/snapshot/data/fetcher/arkenfox_user_js_two_component_version.nix
+  [fetcher] github.com/arkenfox/user.js
+    fetchFromGitHub.rev
+    - "140.0"
+    + <redacted>
+    fetchFromGitHub.hash
+    - "sha256-LPDiiEPOZu5Ah5vCLyCMT3w1uoBhUjyqoPWCOiLVLnw="
+    + <redacted>

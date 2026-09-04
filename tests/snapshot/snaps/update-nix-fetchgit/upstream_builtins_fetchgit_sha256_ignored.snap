@@ -3,15 +3,8 @@ source: tests/snapshot/main.rs
 expression: output_for_insta
 input_file: tests/snapshot/data/update-nix-fetchgit/upstream_builtins_fetchgit_sha256_ignored.nix
 ---
-[
-  {
-    "rule": "fetcher",
-    "target": "github.com/expipiplus1/update-nix-fetchgit",
-    "field": "builtins.fetchGit.ref",
-    "old": "\"v0.2.1\"",
-    "range": [
-      267,
-      275
-    ]
-  }
-]
+tests/snapshot/data/update-nix-fetchgit/upstream_builtins_fetchgit_sha256_ignored.nix
+  [fetcher] github.com/expipiplus1/update-nix-fetchgit
+    builtins.fetchGit.ref
+    - "v0.2.1"
+    + <redacted>

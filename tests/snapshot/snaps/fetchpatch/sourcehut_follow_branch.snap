@@ -3,17 +3,11 @@ source: tests/snapshot/main.rs
 expression: output_for_insta
 input_file: tests/snapshot/data/fetchpatch/sourcehut_follow_branch.nix
 ---
-[
-  {
-    "rule": "fetcher",
-    "target": "git.sr.ht/~sircmpwn/scdoc",
-    "field": "fetchpatch.url",
-    "old": "\"https://git.sr.ht/~sircmpwn/scdoc/commit/0000000000000000000000000000000000000000.patch\""
-  },
-  {
-    "rule": "fetcher",
-    "target": "git.sr.ht/~sircmpwn/scdoc",
-    "field": "fetchpatch.hash",
-    "old": "\"\""
-  }
-]
+tests/snapshot/data/fetchpatch/sourcehut_follow_branch.nix
+  [fetcher] git.sr.ht/~sircmpwn/scdoc
+    fetchpatch.url
+    - "https://git.sr.ht/~sircmpwn/scdoc/commit/0000000000000000000000000000000000000000.patch"
+    + <redacted>
+    fetchpatch.hash
+    - ""
+    + <redacted>

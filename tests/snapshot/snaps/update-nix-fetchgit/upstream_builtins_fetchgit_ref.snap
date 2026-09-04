@@ -3,15 +3,8 @@ source: tests/snapshot/main.rs
 expression: output_for_insta
 input_file: tests/snapshot/data/update-nix-fetchgit/upstream_builtins_fetchgit_ref.nix
 ---
-[
-  {
-    "rule": "fetcher",
-    "target": "github.com/expipiplus1/update-nix-fetchgit",
-    "field": "builtins.fetchGit.ref",
-    "old": "\"v0.2.1\"",
-    "range": [
-      223,
-      231
-    ]
-  }
-]
+tests/snapshot/data/update-nix-fetchgit/upstream_builtins_fetchgit_ref.nix
+  [fetcher] github.com/expipiplus1/update-nix-fetchgit
+    builtins.fetchGit.ref
+    - "v0.2.1"
+    + <redacted>

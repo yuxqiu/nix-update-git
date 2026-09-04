@@ -1,12 +1,6 @@
 use clap::{Parser, ValueEnum};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum OutputFormat {
-    Text,
-    Json,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum RuleName {
     All,
     Fetcher,
@@ -82,9 +76,6 @@ pub struct Cli {
 
     #[arg(short, long, help = "Enable verbose output")]
     pub verbose: bool,
-
-    #[arg(long, value_enum, default_value = "text", help = "Output format")]
-    pub format: OutputFormat,
 
     #[arg(
         short,

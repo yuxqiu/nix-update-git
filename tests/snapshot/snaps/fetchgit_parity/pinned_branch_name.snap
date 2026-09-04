@@ -3,16 +3,8 @@ source: tests/snapshot/main.rs
 expression: output_for_insta
 input_file: tests/snapshot/data/fetchgit_parity/pinned_branch_name.nix
 ---
-[
-  {
-    "rule": "fetcher",
-    "target": "github.com/expipiplus1/update-nix-fetchgit",
-    "field": "fetchgit.hash",
-    "old": "\"\"",
-    "new": "\"sha256-DDga3Xty/T2EoohP8rj+IX0oxbz8//INIujb+VhwScs=\"",
-    "range": [
-      727,
-      729
-    ]
-  }
-]
+tests/snapshot/data/fetchgit_parity/pinned_branch_name.nix
+  [fetcher] github.com/expipiplus1/update-nix-fetchgit
+    fetchgit.hash
+    - ""
+    + "sha256-DDga3Xty/T2EoohP8rj+IX0oxbz8//INIujb+VhwScs="
