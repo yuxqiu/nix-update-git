@@ -1,3 +1,4 @@
+use crate::forge::{self, Forge};
 use crate::parser::{AttrSpec, AttrType, NixNode, TextRange};
 use crate::rules::traits::{CheckResult, CheckWarning, Update, UpdateGroup, UpdateRule};
 use crate::utils::{GitFetcher, VersionDetector};
@@ -14,27 +15,44 @@ const FLAKE_INPUT_ATTR_SPEC: &[AttrSpec] = &[
     },
 ];
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 enum FlakeUrl {
-    GitHub { owner: String, repo: String },
-    GitLab { owner: String, repo: String },
-    SourceHut { owner: String, repo: String },
-    GitRemote { url: String },
-    GitLocal { path: String },
+    /// A `scheme:owner/repo` shorthand for a registered forge (`github:`,
+    /// `gitlab:`, `sourcehut:`, ...). Adding a forge with a
+    /// `flake_scheme()` makes it work here automatically — no variant or
+    /// match arm needed.
+    Forge {
+        forge: &'static dyn Forge,
+        owner: String,
+        repo: String,
+    },
+    GitRemote {
+        url: String,
+    },
+    GitLocal {
+        path: String,
+    },
+}
+
+impl std::fmt::Debug for FlakeUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FlakeUrl::Forge { forge, owner, repo } => f
+                .debug_struct("Forge")
+                .field("forge", &forge.id())
+                .field("owner", owner)
+                .field("repo", repo)
+                .finish(),
+            FlakeUrl::GitRemote { url } => f.debug_struct("GitRemote").field("url", url).finish(),
+            FlakeUrl::GitLocal { path } => f.debug_struct("GitLocal").field("path", path).finish(),
+        }
+    }
 }
 
 impl FlakeUrl {
     fn to_remote_url(&self) -> Option<String> {
         match self {
-            FlakeUrl::GitHub { owner, repo } => {
-                Some(format!("https://github.com/{}/{}", owner, repo))
-            }
-            FlakeUrl::GitLab { owner, repo } => {
-                Some(format!("https://gitlab.com/{}/{}", owner, repo))
-            }
-            FlakeUrl::SourceHut { owner, repo } => {
-                Some(format!("https://sr.ht/~{}/{}", owner, repo))
-            }
+            FlakeUrl::Forge { forge, owner, repo } => Some(forge.remote_url_for_flake(owner, repo)),
             FlakeUrl::GitRemote { url } => Some(url.clone()),
             FlakeUrl::GitLocal { path } => Some(path.clone()),
         }
@@ -42,16 +60,7 @@ impl FlakeUrl {
 
     fn display_target(&self) -> String {
         match self {
-            FlakeUrl::GitHub { owner, repo } => format!("github.com/{}/{}", owner, repo),
-            FlakeUrl::GitLab { owner, repo } => format!("gitlab.com/{}/{}", owner, repo),
-            FlakeUrl::SourceHut { owner, repo } => {
-                let owner_with_tilde = if owner.starts_with('~') {
-                    owner.clone()
-                } else {
-                    format!("~{}", owner)
-                };
-                format!("git.sr.ht/{}/{}", owner_with_tilde, repo)
-            }
+            FlakeUrl::Forge { forge, owner, repo } => forge.display_for_flake(owner, repo),
             // strip url prefix only
             FlakeUrl::GitRemote { url } => url
                 .strip_prefix("https://")
@@ -93,43 +102,28 @@ impl FlakeInputRule {
     fn parse_flake_url(url: &str) -> Option<ParsedFlakeUrl> {
         let url = url.trim();
 
-        if let Some(rest) = url.strip_prefix("github:") {
+        for &forge in forge::FORGES {
+            let Some(scheme) = forge.flake_scheme() else {
+                continue;
+            };
+            let Some(rest) = url.strip_prefix(scheme).and_then(|r| r.strip_prefix(':')) else {
+                continue;
+            };
             let (rest_without_ref, inline_ref, extra_params) =
                 Self::extract_ref_from_url(rest, true);
             let (owner, repo) = rest_without_ref.split_once('/')?;
-            Some(ParsedFlakeUrl {
-                flake_url: FlakeUrl::GitHub {
+            return Some(ParsedFlakeUrl {
+                flake_url: FlakeUrl::Forge {
+                    forge,
                     owner: owner.to_string(),
                     repo: repo.to_string(),
                 },
                 inline_ref,
                 extra_params,
-            })
-        } else if let Some(rest) = url.strip_prefix("gitlab:") {
-            let (rest_without_ref, inline_ref, extra_params) =
-                Self::extract_ref_from_url(rest, true);
-            let (owner, repo) = rest_without_ref.split_once('/')?;
-            Some(ParsedFlakeUrl {
-                flake_url: FlakeUrl::GitLab {
-                    owner: owner.to_string(),
-                    repo: repo.to_string(),
-                },
-                inline_ref,
-                extra_params,
-            })
-        } else if let Some(rest) = url.strip_prefix("sourcehut:") {
-            let (rest_without_ref, inline_ref, extra_params) =
-                Self::extract_ref_from_url(rest, true);
-            let (owner, repo) = rest_without_ref.split_once('/')?;
-            Some(ParsedFlakeUrl {
-                flake_url: FlakeUrl::SourceHut {
-                    owner: owner.to_string(),
-                    repo: repo.to_string(),
-                },
-                inline_ref,
-                extra_params,
-            })
-        } else if let Some(rest) = url.strip_prefix("git+https://") {
+            });
+        }
+
+        if let Some(rest) = url.strip_prefix("git+https://") {
             let (clean_url, inline_ref, extra_params) = Self::extract_ref_from_url(rest, false);
             Some(ParsedFlakeUrl {
                 flake_url: FlakeUrl::GitRemote {
@@ -201,15 +195,13 @@ impl FlakeInputRule {
         let query = Self::build_query(new_ref, extra);
 
         match &parsed.flake_url {
-            FlakeUrl::GitHub { owner, repo } => {
-                Some(format!("github:{}/{}?{}", owner, repo, query))
-            }
-            FlakeUrl::GitLab { owner, repo } => {
-                Some(format!("gitlab:{}/{}?{}", owner, repo, query))
-            }
-            FlakeUrl::SourceHut { owner, repo } => {
-                Some(format!("sourcehut:{}/{}?{}", owner, repo, query))
-            }
+            FlakeUrl::Forge { forge, owner, repo } => Some(format!(
+                "{}:{}/{}?{}",
+                forge.flake_scheme().expect("parsed via a flake scheme"),
+                owner,
+                repo,
+                query
+            )),
             FlakeUrl::GitRemote { url: remote_url } => {
                 if url.starts_with("git+https://") {
                     Some(format!(
@@ -594,10 +586,12 @@ mod tests {
     #[test]
     fn test_parse_github_url() {
         let result = FlakeInputRule::parse_flake_url("github:NixOS/nixpkgs").unwrap();
-        assert!(matches!(result.flake_url, FlakeUrl::GitHub { .. }));
-        if let FlakeUrl::GitHub { owner, repo } = result.flake_url {
+        if let FlakeUrl::Forge { forge, owner, repo } = result.flake_url {
+            assert_eq!(forge.id(), "github");
             assert_eq!(owner, "NixOS");
             assert_eq!(repo, "nixpkgs");
+        } else {
+            panic!("Expected Forge");
         }
         assert!(result.inline_ref.is_none());
     }
@@ -605,14 +599,22 @@ mod tests {
     #[test]
     fn test_parse_gitlab_url() {
         let result = FlakeInputRule::parse_flake_url("gitlab:foo/bar").unwrap();
-        assert!(matches!(result.flake_url, FlakeUrl::GitLab { .. }));
+        if let FlakeUrl::Forge { forge, .. } = result.flake_url {
+            assert_eq!(forge.id(), "gitlab");
+        } else {
+            panic!("Expected Forge");
+        }
         assert!(result.inline_ref.is_none());
     }
 
     #[test]
     fn test_parse_sourcehut_url() {
         let result = FlakeInputRule::parse_flake_url("sourcehut:~user/repo").unwrap();
-        assert!(matches!(result.flake_url, FlakeUrl::SourceHut { .. }));
+        if let FlakeUrl::Forge { forge, .. } = result.flake_url {
+            assert_eq!(forge.id(), "sourcehut");
+        } else {
+            panic!("Expected Forge");
+        }
         assert!(result.inline_ref.is_none());
     }
 
@@ -651,11 +653,12 @@ mod tests {
     fn test_parse_github_url_with_ref() {
         let result =
             FlakeInputRule::parse_flake_url("github:gmodena/nix-flatpak/?ref=v0.6.0").unwrap();
-        if let FlakeUrl::GitHub { owner, repo } = result.flake_url {
+        if let FlakeUrl::Forge { forge, owner, repo } = result.flake_url {
+            assert_eq!(forge.id(), "github");
             assert_eq!(owner, "gmodena");
             assert_eq!(repo, "nix-flatpak");
         } else {
-            panic!("Expected GitHub");
+            panic!("Expected Forge");
         }
         assert_eq!(result.inline_ref.as_deref(), Some("v0.6.0"));
     }
@@ -663,11 +666,12 @@ mod tests {
     #[test]
     fn test_parse_gitlab_url_with_ref() {
         let result = FlakeInputRule::parse_flake_url("gitlab:foo/bar?ref=v1.0.0").unwrap();
-        if let FlakeUrl::GitLab { owner, repo } = result.flake_url {
+        if let FlakeUrl::Forge { forge, owner, repo } = result.flake_url {
+            assert_eq!(forge.id(), "gitlab");
             assert_eq!(owner, "foo");
             assert_eq!(repo, "bar");
         } else {
-            panic!("Expected GitLab");
+            panic!("Expected Forge");
         }
         assert_eq!(result.inline_ref.as_deref(), Some("v1.0.0"));
     }
@@ -675,11 +679,12 @@ mod tests {
     #[test]
     fn test_parse_sourcehut_url_with_ref() {
         let result = FlakeInputRule::parse_flake_url("sourcehut:~user/repo?ref=v2.0").unwrap();
-        if let FlakeUrl::SourceHut { owner, repo } = result.flake_url {
+        if let FlakeUrl::Forge { forge, owner, repo } = result.flake_url {
+            assert_eq!(forge.id(), "sourcehut");
             assert_eq!(owner, "~user");
             assert_eq!(repo, "repo");
         } else {
-            panic!("Expected SourceHut");
+            panic!("Expected Forge");
         }
         assert_eq!(result.inline_ref.as_deref(), Some("v2.0"));
     }
@@ -727,11 +732,11 @@ mod tests {
     #[test]
     fn test_parse_github_url_trailing_slash() {
         let result = FlakeInputRule::parse_flake_url("github:owner/repo/").unwrap();
-        if let FlakeUrl::GitHub { owner, repo } = result.flake_url {
+        if let FlakeUrl::Forge { owner, repo, .. } = result.flake_url {
             assert_eq!(owner, "owner");
             assert_eq!(repo, "repo/");
         } else {
-            panic!("Expected GitHub");
+            panic!("Expected Forge");
         }
         assert_eq!(result.inline_ref, None);
     }
@@ -752,11 +757,11 @@ mod tests {
         let result =
             FlakeInputRule::parse_flake_url("github:owner/repo?ref=v1&submodules=true&rev=abc123")
                 .unwrap();
-        if let FlakeUrl::GitHub { owner, repo } = result.flake_url {
+        if let FlakeUrl::Forge { owner, repo, .. } = result.flake_url {
             assert_eq!(owner, "owner");
             assert_eq!(repo, "repo");
         } else {
-            panic!("Expected GitHub");
+            panic!("Expected Forge");
         }
         assert_eq!(result.inline_ref.as_deref(), Some("v1"));
         assert_eq!(result.extra_params.len(), 2);

@@ -282,7 +282,7 @@ pub(crate) fn parse_fetcher_attrset(
     } else {
         Some(&spec.ident_vars)
     };
-    let parsed = attr_set.parse_attrs(kind.attr_spec(), ident_vars_opt)?;
+    let parsed = attr_set.parse_attrs(&kind.attr_spec(), ident_vars_opt)?;
 
     let mut interpolated = HashMap::new();
     let mut interpolated_unresolved = Vec::new();
@@ -1040,17 +1040,9 @@ impl UpdateRule for FetcherRule {
         let mut result = match call.kind {
             FetcherKind::FetchPatch => Self::check_fetchpatch_call(&call),
             FetcherKind::FetchTarball => Self::check_fetchtarball_call(&call),
-            FetcherKind::BuiltinsFetchGit
-            | FetcherKind::FetchGit
-            | FetcherKind::FetchFromGitHub
-            | FetcherKind::FetchFromGitLab
-            | FetcherKind::FetchFromGitea
-            | FetcherKind::FetchFromForgejo
-            | FetcherKind::FetchFromCodeberg
-            | FetcherKind::FetchFromBitbucket
-            | FetcherKind::FetchFromSourcehut
-            | FetcherKind::FetchFromGitiles
-            | FetcherKind::FetchFromRepoOrCz => self.check_fetcher_call(&call),
+            FetcherKind::BuiltinsFetchGit | FetcherKind::FetchGit | FetcherKind::Forge(_) => {
+                self.check_fetcher_call(&call)
+            }
         };
 
         for group in &mut result.groups {
@@ -1524,9 +1516,12 @@ stdenv.mkDerivation (finalAttrs: {
             .unwrap();
         let mut spec = super::InterpolationSpec::none();
         spec.allow_idents(HashMap::from([("pname".to_string(), "my-pkg".to_string())]));
-        let attrs =
-            super::parse_fetcher_attrset(super::FetcherKind::FetchFromGitHub, &attr_set, &spec)
-                .unwrap();
+        let attrs = super::parse_fetcher_attrset(
+            super::FetcherKind::from_name("fetchFromGitHub").unwrap(),
+            &attr_set,
+            &spec,
+        )
+        .unwrap();
         assert_eq!(
             attrs.parsed.strings.get("repo"),
             Some(&"my-pkg".to_string())
@@ -1547,8 +1542,11 @@ stdenv.mkDerivation (finalAttrs: {
             .find(|n| n.kind() == rnix::SyntaxKind::NODE_ATTR_SET)
             .unwrap();
         let spec = super::InterpolationSpec::none();
-        let result =
-            super::parse_fetcher_attrset(super::FetcherKind::FetchFromGitHub, &attr_set, &spec);
+        let result = super::parse_fetcher_attrset(
+            super::FetcherKind::from_name("fetchFromGitHub").unwrap(),
+            &attr_set,
+            &spec,
+        );
         assert!(result.is_err());
     }
 
@@ -1565,9 +1563,12 @@ stdenv.mkDerivation (finalAttrs: {
             "finalAttrs.version".to_string(),
             "1.0.0".to_string(),
         )]));
-        let attrs =
-            super::parse_fetcher_attrset(super::FetcherKind::FetchFromGitHub, &attr_set, &spec)
-                .unwrap();
+        let attrs = super::parse_fetcher_attrset(
+            super::FetcherKind::from_name("fetchFromGitHub").unwrap(),
+            &attr_set,
+            &spec,
+        )
+        .unwrap();
         assert_eq!(attrs.parsed.strings.get("rev"), Some(&"1.0.0".to_string()));
         assert_eq!(
             attrs.parsed.strings.get("owner"),
@@ -1589,9 +1590,12 @@ stdenv.mkDerivation (finalAttrs: {
             .unwrap();
         let mut spec = super::InterpolationSpec::none();
         spec.allow_all(HashMap::from([("pname".to_string(), "foo".to_string())]));
-        let attrs =
-            super::parse_fetcher_attrset(super::FetcherKind::FetchFromGitHub, &attr_set, &spec)
-                .unwrap();
+        let attrs = super::parse_fetcher_attrset(
+            super::FetcherKind::from_name("fetchFromGitHub").unwrap(),
+            &attr_set,
+            &spec,
+        )
+        .unwrap();
         assert!(attrs.interpolated.contains_key("owner"));
         assert!(!attrs.interpolated_unresolved.iter().any(|k| k == "owner"));
         assert_eq!(attrs.parsed.strings.get("rev"), Some(&"v1.0.0".to_string()));
@@ -1611,9 +1615,12 @@ stdenv.mkDerivation (finalAttrs: {
             "rev",
             HashMap::from([("version".to_string(), "1.0".to_string())]),
         );
-        let attrs =
-            super::parse_fetcher_attrset(super::FetcherKind::FetchFromGitHub, &attr_set, &spec)
-                .unwrap();
+        let attrs = super::parse_fetcher_attrset(
+            super::FetcherKind::from_name("fetchFromGitHub").unwrap(),
+            &attr_set,
+            &spec,
+        )
+        .unwrap();
         assert!(attrs.interpolated.contains_key("rev"));
         assert!(attrs.interpolated.contains_key("owner"));
         assert!(attrs.interpolated_unresolved.is_empty());
