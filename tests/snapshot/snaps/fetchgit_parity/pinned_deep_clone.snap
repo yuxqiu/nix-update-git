@@ -7,4 +7,4 @@ tests/snapshot/data/fetchgit_parity/pinned_deep_clone.nix
   [fetcher] github.com/expipiplus1/update-nix-fetchgit
     fetchgit.hash
     - ""
-    + "sha256-OpqMhpftKhaqD1LkJ1hux6ZnewG/4/rGa7sUrrJ9MCs="
+    + <redacted>
