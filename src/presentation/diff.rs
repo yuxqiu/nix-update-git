@@ -41,9 +41,8 @@ impl FileDiff {
         let hunks = fr
             .updates_per_rule
             .iter()
-            .flat_map(|(rule_name, groups)| {
-                groups.iter().map(move |group| {
-                    let target = group.updates.iter().find_map(|u| u.target.clone());
+            .flat_map(|(_, groups)| {
+                groups.iter().map(|group| {
                     let changes = group
                         .updates
                         .iter()
@@ -54,8 +53,8 @@ impl FileDiff {
                         })
                         .collect();
                     Hunk {
-                        rule_name: rule_name.clone(),
-                        target: target.map(|t| sanitize(&t)),
+                        rule_name: group.rule_name.clone(),
+                        target: group.target.as_deref().map(sanitize),
                         changes,
                         updates: group.updates.clone(),
                     }

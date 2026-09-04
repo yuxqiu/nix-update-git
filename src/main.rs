@@ -58,44 +58,66 @@ fn print_warnings(warnings: &[CheckWarning]) {
     }
 }
 
-/// Applies `updates` to `path` (if non-empty) and reports the result.
-/// Returns `false` if writing the file failed.
-fn apply_and_report(path: &Path, content: &str, updates: &[Update]) -> bool {
+/// Result of trying to apply one file's accepted updates.
+enum ApplyOutcome {
+    /// Nothing to do for this file (no accepted updates).
+    NoUpdates,
+    /// Written successfully.
+    Applied,
+    /// Write failed; the error is already reported to stderr.
+    Failed,
+}
+
+/// Applies `updates` to `path` (if non-empty).
+///
+/// Deliberately silent on success: in `--update` mode the diff already
+/// printed above (or the interactive prompt just answered) says exactly
+/// what changed in this file, so a per-file "Applied N update(s)" line
+/// would only repeat that — and, with one printed per file, made it hard to
+/// tell where one file's report ended and the next began. Callers count
+/// `Applied` outcomes and print a single summary at the end of the run
+/// instead. Failure is still reported here, per-file: unlike a successful
+/// write, it's new information the diff couldn't have shown.
+fn apply_and_report(path: &Path, content: &str, updates: &[Update]) -> ApplyOutcome {
     if updates.is_empty() {
-        return true;
+        return ApplyOutcome::NoUpdates;
     }
     let new_content = patch::apply_updates(content, updates, path);
     match fs::write(path, &new_content) {
-        Ok(()) => {
-            println!("{}: Applied {} update(s)", path.display(), updates.len());
-            true
-        }
+        Ok(()) => ApplyOutcome::Applied,
         Err(e) => {
             eprintln!("Error writing {}: {}", path.display(), e);
-            false
+            ApplyOutcome::Failed
         }
     }
 }
 
 /// `--update --interactive`: prompt hunk-by-hunk, then apply only the
-/// accepted updates. Returns `true` if any file failed to write.
-fn run_interactive(file_results: &[FileResult], color: bool) -> bool {
+/// accepted updates. Returns `(had_errors, files_updated)`.
+fn run_interactive(file_results: &[FileResult], color: bool) -> (bool, usize) {
     let diffs: Vec<FileDiff> = file_results.iter().map(FileDiff::from_result).collect();
     let selections = interactive::select(&diffs, color);
     let mut had_errors = false;
+    let mut files_updated = 0;
     for (fr, to_apply) in file_results.iter().zip(selections) {
-        if !apply_and_report(&fr.file_path, &fr.content, &to_apply) {
-            had_errors = true;
+        match apply_and_report(&fr.file_path, &fr.content, &to_apply) {
+            ApplyOutcome::Applied => files_updated += 1,
+            ApplyOutcome::Failed => had_errors = true,
+            ApplyOutcome::NoUpdates => {}
         }
     }
-    had_errors
+    (had_errors, files_updated)
 }
 
 /// Default (non-interactive) mode: render each file's diff, and apply every
-/// update when `--update` is set. Returns `true` if any file failed to
-/// write.
-fn run_default(file_results: &[FileResult], cli: &nix_update_git::cli::Cli, color: bool) -> bool {
+/// update when `--update` is set. Returns `(had_errors, files_updated)`.
+fn run_default(
+    file_results: &[FileResult],
+    cli: &nix_update_git::cli::Cli,
+    color: bool,
+) -> (bool, usize) {
     let mut had_errors = false;
+    let mut files_updated = 0;
     for fr in file_results {
         let diff = FileDiff::from_result(fr);
         match render(&diff, cli.verbose, color) {
@@ -106,12 +128,14 @@ fn run_default(file_results: &[FileResult], cli: &nix_update_git::cli::Cli, colo
 
         if cli.update {
             let to_apply = fr.all_updates();
-            if !apply_and_report(&fr.file_path, &fr.content, &to_apply) {
-                had_errors = true;
+            match apply_and_report(&fr.file_path, &fr.content, &to_apply) {
+                ApplyOutcome::Applied => files_updated += 1,
+                ApplyOutcome::Failed => had_errors = true,
+                ApplyOutcome::NoUpdates => {}
             }
         }
     }
-    had_errors
+    (had_errors, files_updated)
 }
 
 fn main() -> Result<()> {
@@ -159,12 +183,16 @@ fn main() -> Result<()> {
     }
 
     let color = resolve_color(cli.color);
-    let run_had_errors = if cli.update && cli.interactive {
+    let (run_had_errors, files_updated) = if cli.update && cli.interactive {
         run_interactive(&file_results, color)
     } else {
         run_default(&file_results, &cli, color)
     };
     had_errors |= run_had_errors;
+
+    if files_updated > 0 {
+        println!("Updated {files_updated} file(s).");
+    }
 
     if had_errors {
         std::process::exit(1);

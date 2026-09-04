@@ -21,14 +21,12 @@ pub fn apply_updates(content: &str, updates: &[Update], file_path: &Path) -> Str
                 file_path.display()
             );
             eprintln!(
-                "  Rule '{}' update '{}' at bytes {}..{} ({} -> {}) overlaps with rule '{}' update '{}' at bytes {}..{} ({} -> {})",
-                last.rule_name,
+                "  update '{}' at bytes {}..{} ({} -> {}) overlaps with update '{}' at bytes {}..{} ({} -> {})",
                 last.field,
                 last.range.start,
                 last.range.end,
                 old1,
                 last.replacement,
-                update.rule_name,
                 update.field,
                 update.range.start,
                 update.range.end,

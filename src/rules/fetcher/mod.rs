@@ -99,9 +99,7 @@ impl UpdateRule for FetcherRule {
         };
 
         for group in &mut result.groups {
-            for update in &mut group.updates {
-                update.target.clone_from(&target);
-            }
+            group.target.clone_from(&target);
         }
 
         result

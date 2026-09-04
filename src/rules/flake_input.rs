@@ -508,27 +508,21 @@ impl UpdateRule for FlakeInputRule {
                     let mut input_updates = Vec::new();
                     if input_def.inline_ref {
                         if let Some(new_url) = Self::reconstruct_url(&url_sv.value, &latest_tag) {
-                            input_updates.push(
-                                Update::new(
-                                    format!("inputs.{}.url", input_def.name),
-                                    format!("\"{}\"", new_url),
-                                    url_sv.range,
-                                )
-                                .with_target(target),
-                            );
+                            input_updates.push(Update::new(
+                                format!("inputs.{}.url", input_def.name),
+                                format!("\"{}\"", new_url),
+                                url_sv.range,
+                            ));
                         }
                     } else {
-                        input_updates.push(
-                            Update::new(
-                                format!("inputs.{}.ref", input_def.name),
-                                format!("\"{}\"", latest_tag),
-                                ref_sv.range,
-                            )
-                            .with_target(target),
-                        );
+                        input_updates.push(Update::new(
+                            format!("inputs.{}.ref", input_def.name),
+                            format!("\"{}\"", latest_tag),
+                            ref_sv.range,
+                        ));
                     }
                     if !input_updates.is_empty() {
-                        groups.push(UpdateGroup::new(input_updates));
+                        groups.push(UpdateGroup::new(input_updates).with_target(target));
                     }
                 }
                 Ok(_) => {}

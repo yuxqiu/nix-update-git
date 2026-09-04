@@ -36,12 +36,8 @@ impl UpdateRule for DerivationRule {
 
         let mut result = resolve::check_derivation_call(&self.rule_name, &call);
 
-        if !result.groups.is_empty() {
-            for group in &mut result.groups {
-                for update in &mut group.updates {
-                    update.target.clone_from(&target);
-                }
-            }
+        for group in &mut result.groups {
+            group.target.clone_from(&target);
         }
 
         result

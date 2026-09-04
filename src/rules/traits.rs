@@ -2,13 +2,16 @@ use std::fmt;
 
 use crate::parser::{NixNode, TextRange};
 
+/// One text-splice instruction: replace `range` with `replacement`.
+///
+/// Pure patch-application data — no provenance (which rule produced it) or
+/// display (what to show a user) concerns; those are group-level facts, see
+/// `UpdateGroup`.
 #[derive(Debug, Clone)]
 pub struct Update {
     pub field: String,
     pub replacement: String,
     pub range: TextRange,
-    pub rule_name: String,
-    pub target: Option<String>,
 }
 
 impl Update {
@@ -17,6 +20,34 @@ impl Update {
             field: field.into(),
             replacement: replacement.into(),
             range,
+        }
+    }
+}
+
+/// A group of updates that must be applied atomically.
+///
+/// If any update in the group depends on a computation that fails
+/// (e.g., hash prefetch in flaky network), the entire group is discarded
+/// to avoid leaving the file in an inconsistent state.
+///
+/// `rule_name` and `target` live here, not on `Update`: every update in a
+/// group is produced by the same rule and shares the same display target,
+/// so storing them per-update would just be the same string copied onto
+/// every member of the group. `rule_name` is filled in once by
+/// `RuleRegistry::check_all` (the only place that knows which rule a group
+/// came from); `target` is filled in by the rule itself, when it has one.
+#[derive(Debug, Clone)]
+pub struct UpdateGroup {
+    pub updates: Vec<Update>,
+    pub rule_name: String,
+    pub target: Option<String>,
+}
+
+impl UpdateGroup {
+    #[must_use]
+    pub const fn new(updates: Vec<Update>) -> Self {
+        Self {
+            updates,
             rule_name: String::new(),
             target: None,
         }
@@ -26,23 +57,6 @@ impl Update {
     pub fn with_target(mut self, target: impl Into<String>) -> Self {
         self.target = Some(target.into());
         self
-    }
-}
-
-/// A group of updates that must be applied atomically.
-///
-/// If any update in the group depends on a computation that fails
-/// (e.g., hash prefetch in flaky network), the entire group is discarded
-/// to avoid leaving the file in an inconsistent state.
-#[derive(Debug, Clone)]
-pub struct UpdateGroup {
-    pub updates: Vec<Update>,
-}
-
-impl UpdateGroup {
-    #[must_use]
-    pub const fn new(updates: Vec<Update>) -> Self {
-        Self { updates }
     }
 
     #[must_use]
@@ -205,9 +219,7 @@ impl RuleRegistry {
                         let rule_name = rule.name().to_string();
                         let mut groups = groups;
                         for group in &mut groups {
-                            for update in &mut group.updates {
-                                update.rule_name.clone_from(&rule_name);
-                            }
+                            group.rule_name.clone_from(&rule_name);
                         }
                         results.push((rule_name, groups));
                     }
