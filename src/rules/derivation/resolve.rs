@@ -29,11 +29,11 @@ fn extract_version_from_interpolated_ref(
 }
 
 pub(super) fn check_derivation_call(rule_name: &str, call: &DerivationCall) -> CheckResult {
-    if call.pinned {
+    if call.pinned() {
         return CheckResult::empty();
     }
 
-    let git_url = match call.fetcher_kind.git_url(&call.fetcher_parsed) {
+    let git_url = match call.fetcher_kind().git_url(call.fetcher_parsed()) {
         Some(url) => url,
         None => return CheckResult::empty(),
     };
@@ -41,14 +41,14 @@ pub(super) fn check_derivation_call(rule_name: &str, call: &DerivationCall) -> C
     let mut updates = Vec::new();
     let mut warnings: Vec<CheckWarning> = Vec::new();
     let mut effective_ref_changed = false;
-    let mut target_version = call.version_value.clone();
+    let mut target_version = call.version_value().to_string();
     let mut new_source_ref_text: Option<String> = None;
 
-    match &call.source_ref_value {
+    match call.source_ref_value() {
         SourceRefValue::Pure(current_ref) if !current_ref.is_empty() => {
             if !is_commit_hash(current_ref)
                 && VersionDetector::is_version(current_ref)
-                && current_ref == &call.version_value
+                && current_ref == call.version_value()
             {
                 match GitFetcher::get_latest_tag_matching(&git_url, Some(current_ref)) {
                     Ok(Some(latest))
@@ -68,9 +68,9 @@ pub(super) fn check_derivation_call(rule_name: &str, call: &DerivationCall) -> C
                     }
                 }
             } else if is_commit_hash(current_ref) {
-                match GitFetcher::get_latest_tag_matching(&git_url, Some(&call.version_value)) {
+                match GitFetcher::get_latest_tag_matching(&git_url, Some(call.version_value())) {
                     Ok(Some(latest))
-                        if VersionDetector::compare(&call.version_value, &latest)
+                        if VersionDetector::compare(call.version_value(), &latest)
                             == std::cmp::Ordering::Less =>
                     {
                         target_version = latest.clone();
@@ -90,9 +90,9 @@ pub(super) fn check_derivation_call(rule_name: &str, call: &DerivationCall) -> C
             }
         }
         SourceRefValue::Pure(current_ref) => {
-            match GitFetcher::get_latest_tag_matching(&git_url, Some(&call.version_value)) {
+            match GitFetcher::get_latest_tag_matching(&git_url, Some(call.version_value())) {
                 Ok(Some(latest))
-                    if VersionDetector::compare(&call.version_value, &latest)
+                    if VersionDetector::compare(call.version_value(), &latest)
                         == std::cmp::Ordering::Less =>
                 {
                     target_version = latest.clone();
@@ -100,7 +100,7 @@ pub(super) fn check_derivation_call(rule_name: &str, call: &DerivationCall) -> C
                 }
                 Ok(_) => {
                     if current_ref.is_empty() {
-                        new_source_ref_text = Some(call.version_value.clone());
+                        new_source_ref_text = Some(call.version_value().to_string());
                     }
                 }
                 Err(e) => {
@@ -116,8 +116,8 @@ pub(super) fn check_derivation_call(rule_name: &str, call: &DerivationCall) -> C
             template_node,
             version_var,
         } => {
-            let mut vars = call.extra_vars.clone();
-            vars.insert(version_var.clone(), call.version_value.clone());
+            let mut vars = call.extra_vars().clone();
+            vars.insert(version_var.clone(), call.version_value().to_string());
             if let Some(resolved_ref) = template_node.interpolated_string_content(&vars) {
                 match GitFetcher::get_latest_tag_matching(&git_url, Some(&resolved_ref)) {
                     Ok(Some(latest_ref))
@@ -128,9 +128,9 @@ pub(super) fn check_derivation_call(rule_name: &str, call: &DerivationCall) -> C
                             template_node,
                             &latest_ref,
                             version_var,
-                            &call.extra_vars,
+                            call.extra_vars(),
                         ) && VersionDetector::is_version(&candidate_version)
-                            && VersionDetector::compare(&call.version_value, &candidate_version)
+                            && VersionDetector::compare(call.version_value(), &candidate_version)
                                 == std::cmp::Ordering::Less
                         {
                             target_version = candidate_version;
@@ -149,9 +149,9 @@ pub(super) fn check_derivation_call(rule_name: &str, call: &DerivationCall) -> C
             }
         }
         SourceRefValue::IdentFromVersion => {
-            match GitFetcher::get_latest_tag_matching(&git_url, Some(&call.version_value)) {
+            match GitFetcher::get_latest_tag_matching(&git_url, Some(call.version_value())) {
                 Ok(Some(latest))
-                    if VersionDetector::compare(&call.version_value, &latest)
+                    if VersionDetector::compare(call.version_value(), &latest)
                         == std::cmp::Ordering::Less =>
                 {
                     target_version = latest;
@@ -171,24 +171,24 @@ pub(super) fn check_derivation_call(rule_name: &str, call: &DerivationCall) -> C
     }
 
     let version_updated =
-        VersionDetector::compare(&call.version_value, &target_version) == std::cmp::Ordering::Less;
+        VersionDetector::compare(call.version_value(), &target_version) == std::cmp::Ordering::Less;
     if version_updated {
         updates.push(Update::new(
             format!("{}.version", rule_name),
             format!("\"{}\"", target_version),
-            call.version_range,
+            call.version_range(),
         ));
     }
 
     if let (Some(key), Some(range), Some(new_ref_text)) = (
-        call.source_ref_key.as_ref(),
-        call.source_ref_range,
+        call.source_ref_key().as_ref(),
+        call.source_ref_range(),
         new_source_ref_text.as_ref(),
-    ) && let SourceRefValue::Pure(old_ref_text) = &call.source_ref_value
+    ) && let SourceRefValue::Pure(old_ref_text) = call.source_ref_value()
         && old_ref_text != new_ref_text
     {
         updates.push(Update::new(
-            format!("{}.{}", call.fetcher_kind.name(), key),
+            format!("{}.{}", call.fetcher_kind().name(), key),
             format!("\"{}\"", new_ref_text),
             range,
         ));
@@ -196,29 +196,29 @@ pub(super) fn check_derivation_call(rule_name: &str, call: &DerivationCall) -> C
     }
 
     let hash_empty = call
-        .fetcher_parsed
+        .fetcher_parsed()
         .strings
         .get("hash")
         .is_some_and(String::is_empty)
         || call
-            .fetcher_parsed
+            .fetcher_parsed()
             .strings
             .get("sha256")
             .is_some_and(String::is_empty);
     let should_refresh_hash =
-        call.fetcher_kind.needs_hash() && (hash_empty || effective_ref_changed);
+        call.fetcher_kind().needs_hash() && (hash_empty || effective_ref_changed);
     let mut hash_failed = false;
     if should_refresh_hash {
         let rev_for_hash = if let Some(new_ref_text) = new_source_ref_text.as_ref() {
             resolve_ref_for_prefetch(&git_url, new_ref_text)
         } else {
-            match &call.source_ref_value {
+            match call.source_ref_value() {
                 SourceRefValue::Pure(reference) => resolve_ref_for_prefetch(&git_url, reference),
                 SourceRefValue::InterpolatedFromVersion {
                     template_node,
                     version_var,
                 } => {
-                    let mut vars = call.extra_vars.clone();
+                    let mut vars = call.extra_vars().clone();
                     vars.insert(version_var.clone(), target_version.clone());
                     template_node
                         .interpolated_string_content(&vars)
@@ -232,19 +232,19 @@ pub(super) fn check_derivation_call(rule_name: &str, call: &DerivationCall) -> C
         };
 
         if let Some(rev_for_hash) = rev_for_hash {
-            let result = compute_hash(&call.fetcher_kind, &call.fetcher_parsed, &rev_for_hash);
+            let result = compute_hash(&call.fetcher_kind(), call.fetcher_parsed(), &rev_for_hash);
             match result {
                 Ok(nar_hash) => {
-                    if let Some(range) = call.fetcher_parsed.string_range("hash") {
+                    if let Some(range) = call.fetcher_parsed().string_range("hash") {
                         updates.push(Update::new(
-                            format!("{}.hash", call.fetcher_kind.name()),
+                            format!("{}.hash", call.fetcher_kind().name()),
                             format!("\"{}\"", nar_hash.sri),
                             range,
                         ));
                     }
-                    if let Some(range) = call.fetcher_parsed.string_range("sha256") {
+                    if let Some(range) = call.fetcher_parsed().string_range("sha256") {
                         updates.push(Update::new(
-                            format!("{}.sha256", call.fetcher_kind.name()),
+                            format!("{}.sha256", call.fetcher_kind().name()),
                             format!("\"{}\"", nar_hash.nix32),
                             range,
                         ));

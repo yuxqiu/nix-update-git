@@ -86,9 +86,9 @@ impl UpdateRule for FetcherRule {
             None => return CheckResult::empty(),
         };
 
-        let target = call.kind.display_target(&call.parsed);
+        let target = call.kind().display_target(call.parsed());
 
-        let mut result = match call.kind {
+        let mut result = match call.kind() {
             FetcherKind::FetchPatch => dispatch::check_fetchpatch_call(&call),
             FetcherKind::FetchTarball => dispatch::check_fetchtarball_call(&call),
             FetcherKind::BuiltinsFetchGit | FetcherKind::FetchGit | FetcherKind::Forge(_) => {

@@ -8,11 +8,33 @@ use crate::rules::derivation::OWNED_FUNC_NAMES;
 use super::interpolate::{InterpolationSpec, parse_fetcher_attrset};
 use super::kind::FetcherKind;
 
+/// Only ever constructed by `try_extract_call` — fields are private so
+/// nothing downstream can assemble one from arbitrary parts and skip the
+/// validation `try_extract_call` does (operational-key interpolation
+/// checks, pin/follow-comment resolution, ...).
 pub(super) struct FetcherCall {
-    pub(super) kind: FetcherKind,
-    pub(super) parsed: ParsedAttrs,
-    pub(super) pinned: bool,
-    pub(super) follow: Option<String>,
+    kind: FetcherKind,
+    parsed: ParsedAttrs,
+    pinned: bool,
+    follow: Option<String>,
+}
+
+impl FetcherCall {
+    pub(super) fn kind(&self) -> FetcherKind {
+        self.kind
+    }
+
+    pub(super) fn parsed(&self) -> &ParsedAttrs {
+        &self.parsed
+    }
+
+    pub(super) fn pinned(&self) -> bool {
+        self.pinned
+    }
+
+    pub(super) fn follow(&self) -> Option<&str> {
+        self.follow.as_deref()
+    }
 }
 
 pub(super) fn try_extract_call(node: &NixNode) -> Option<FetcherCall> {

@@ -32,7 +32,7 @@ impl UpdateRule for DerivationRule {
             None => return CheckResult::empty(),
         };
 
-        let target = call.fetcher_kind.display_target(&call.fetcher_parsed);
+        let target = call.fetcher_kind().display_target(call.fetcher_parsed());
 
         let mut result = resolve::check_derivation_call(&self.rule_name, &call);
 

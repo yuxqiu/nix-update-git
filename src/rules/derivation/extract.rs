@@ -7,16 +7,57 @@ use crate::parser::{NixNode, ParsedAttrs, TextRange};
 use crate::rules::fetcher::{InterpolationSpec, kind::FetcherKind, parse_fetcher_attrset};
 use crate::utils::VersionDetector;
 
+/// Only ever constructed by `try_extract_call` — fields are private so
+/// nothing downstream can assemble one from arbitrary parts and skip the
+/// validation `try_extract_call` does.
 pub(super) struct DerivationCall {
-    pub(super) version_value: String,
-    pub(super) version_range: TextRange,
-    pub(super) source_ref_key: Option<String>,
-    pub(super) source_ref_value: SourceRefValue,
-    pub(super) source_ref_range: Option<TextRange>,
-    pub(super) fetcher_kind: FetcherKind,
-    pub(super) fetcher_parsed: ParsedAttrs,
-    pub(super) extra_vars: HashMap<String, String>,
-    pub(super) pinned: bool,
+    version_value: String,
+    version_range: TextRange,
+    source_ref_key: Option<String>,
+    source_ref_value: SourceRefValue,
+    source_ref_range: Option<TextRange>,
+    fetcher_kind: FetcherKind,
+    fetcher_parsed: ParsedAttrs,
+    extra_vars: HashMap<String, String>,
+    pinned: bool,
+}
+
+impl DerivationCall {
+    pub(super) fn version_value(&self) -> &str {
+        &self.version_value
+    }
+
+    pub(super) fn version_range(&self) -> TextRange {
+        self.version_range
+    }
+
+    pub(super) fn source_ref_key(&self) -> Option<&str> {
+        self.source_ref_key.as_deref()
+    }
+
+    pub(super) fn source_ref_value(&self) -> &SourceRefValue {
+        &self.source_ref_value
+    }
+
+    pub(super) fn source_ref_range(&self) -> Option<TextRange> {
+        self.source_ref_range
+    }
+
+    pub(super) fn fetcher_kind(&self) -> FetcherKind {
+        self.fetcher_kind
+    }
+
+    pub(super) fn fetcher_parsed(&self) -> &ParsedAttrs {
+        &self.fetcher_parsed
+    }
+
+    pub(super) fn extra_vars(&self) -> &HashMap<String, String> {
+        &self.extra_vars
+    }
+
+    pub(super) fn pinned(&self) -> bool {
+        self.pinned
+    }
 }
 
 pub(super) enum SourceRefValue {
