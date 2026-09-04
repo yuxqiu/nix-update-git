@@ -23,14 +23,17 @@ pub const OWNED_FUNC_NAMES: &[&str] = &[
     "buildVimPlugin",
 ];
 
+#[must_use]
 pub fn mk_derivation_rule() -> DerivationRule {
     DerivationRule::new("mk-derivation", vec!["mkDerivation".to_string()])
 }
 
+#[must_use]
 pub fn build_rust_package_rule() -> DerivationRule {
     DerivationRule::new("build-rust-package", vec!["buildRustPackage".to_string()])
 }
 
+#[must_use]
 pub fn build_go_module_rule() -> DerivationRule {
     DerivationRule::new(
         "build-go-module",
@@ -38,6 +41,7 @@ pub fn build_go_module_rule() -> DerivationRule {
     )
 }
 
+#[must_use]
 pub fn build_python_package_rule() -> DerivationRule {
     DerivationRule::new(
         "build-python-package",
@@ -48,18 +52,22 @@ pub fn build_python_package_rule() -> DerivationRule {
     )
 }
 
+#[must_use]
 pub fn build_dune_package_rule() -> DerivationRule {
     DerivationRule::new("build-dune-package", vec!["buildDunePackage".to_string()])
 }
 
+#[must_use]
 pub fn build_npm_package_rule() -> DerivationRule {
     DerivationRule::new("build-npm-package", vec!["buildNpmPackage".to_string()])
 }
 
+#[must_use]
 pub fn build_mix_package_rule() -> DerivationRule {
     DerivationRule::new("build-mix-package", vec!["buildMixPackage".to_string()])
 }
 
+#[must_use]
 pub fn build_rebar3_release_rule() -> DerivationRule {
     DerivationRule::new(
         "build-rebar3-release",
@@ -67,10 +75,12 @@ pub fn build_rebar3_release_rule() -> DerivationRule {
     )
 }
 
+#[must_use]
 pub fn build_gem_rule() -> DerivationRule {
     DerivationRule::new("build-gem", vec!["buildGem".to_string()])
 }
 
+#[must_use]
 pub fn build_haskell_package_rule() -> DerivationRule {
     DerivationRule::new(
         "build-haskell-package",
@@ -81,6 +91,7 @@ pub fn build_haskell_package_rule() -> DerivationRule {
     )
 }
 
+#[must_use]
 pub fn build_emscripten_package_rule() -> DerivationRule {
     DerivationRule::new(
         "build-emscripten-package",
@@ -88,6 +99,7 @@ pub fn build_emscripten_package_rule() -> DerivationRule {
     )
 }
 
+#[must_use]
 pub fn build_vim_plugin_rule() -> DerivationRule {
     DerivationRule::new("build-vim-plugin", vec!["buildVimPlugin".to_string()])
 }

@@ -14,6 +14,7 @@ pub struct FileResult {
 }
 
 impl FileResult {
+    #[must_use]
     pub fn all_updates(&self) -> Vec<Update> {
         self.updates_per_rule
             .iter()
@@ -23,6 +24,7 @@ impl FileResult {
             .collect()
     }
 
+    #[must_use]
     pub fn all_groups(&self) -> Vec<&UpdateGroup> {
         self.updates_per_rule
             .iter()
@@ -31,6 +33,9 @@ impl FileResult {
     }
 }
 
+/// # Errors
+///
+/// Returns an error if `file_path` cannot be read or fails to parse as Nix.
 pub fn check_file(file_path: &Path, registry: &RuleRegistry) -> Result<FileResult> {
     let content = fs::read_to_string(file_path)?;
     let nix_file = NixFile::parse(&content)

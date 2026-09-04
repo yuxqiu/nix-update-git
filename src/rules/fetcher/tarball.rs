@@ -5,6 +5,10 @@ use crate::utils::{NarHash, TarballHasher};
 
 use super::kind::FetcherKind;
 
+/// # Errors
+///
+/// Returns an error if `kind` isn't a tarball-hashable forge, its archive
+/// URL can't be built, or downloading/hashing the archive fails.
 pub fn compute_hash(kind: &FetcherKind, parsed: &ParsedAttrs, rev: &str) -> Result<NarHash> {
     let url = match kind {
         FetcherKind::Forge(forge) => forge.archive_url(parsed, rev)?,

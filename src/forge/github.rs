@@ -43,8 +43,7 @@ impl Forge for GitHub {
         let base = parsed
             .strings
             .get("githubBase")
-            .map(|s| s.as_str())
-            .unwrap_or("github.com");
+            .map_or("github.com", std::string::String::as_str);
         Some(format!("https://{}/{}/{}", base, owner, repo))
     }
 
@@ -68,8 +67,7 @@ impl Forge for GitHub {
         let base = parsed
             .strings
             .get("githubBase")
-            .map(|s| s.as_str())
-            .unwrap_or("github.com");
+            .map_or("github.com", std::string::String::as_str);
         Ok(format!(
             "https://{}/{}/{}/archive/{}.tar.gz",
             base, owner, repo, rev

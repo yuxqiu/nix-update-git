@@ -43,8 +43,7 @@ impl Forge for GitLab {
         let domain = parsed
             .strings
             .get("domain")
-            .map(|s| s.as_str())
-            .unwrap_or("gitlab.com");
+            .map_or("gitlab.com", std::string::String::as_str);
         Some(format!("https://{}/{}/{}", domain, owner, repo))
     }
 
@@ -54,8 +53,7 @@ impl Forge for GitLab {
         let domain = parsed
             .strings
             .get("domain")
-            .map(|s| s.as_str())
-            .unwrap_or("gitlab.com");
+            .map_or("gitlab.com", std::string::String::as_str);
         Some(format!("{}/{}/{}", domain, owner, repo))
     }
 
@@ -63,8 +61,7 @@ impl Forge for GitLab {
         let domain = parsed
             .strings
             .get("domain")
-            .map(|s| s.as_str())
-            .unwrap_or("gitlab.com");
+            .map_or("gitlab.com", std::string::String::as_str);
         let owner = parsed
             .strings
             .get("owner")

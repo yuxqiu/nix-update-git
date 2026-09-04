@@ -15,14 +15,13 @@ fn run_git(args: &[&str], current_dir: &Path) -> std::process::Output {
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .output()
         .expect("failed to run git");
-    if !output.status.success() {
-        panic!(
-            "git {:?} failed in {}: {}",
-            args,
-            current_dir.display(),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    assert!(
+        output.status.success(),
+        "git {:?} failed in {}: {}",
+        args,
+        current_dir.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
     output
 }
 

@@ -20,15 +20,15 @@ pub(super) struct FetcherCall {
 }
 
 impl FetcherCall {
-    pub(super) fn kind(&self) -> FetcherKind {
+    pub(super) const fn kind(&self) -> FetcherKind {
         self.kind
     }
 
-    pub(super) fn parsed(&self) -> &ParsedAttrs {
+    pub(super) const fn parsed(&self) -> &ParsedAttrs {
         &self.parsed
     }
 
-    pub(super) fn pinned(&self) -> bool {
+    pub(super) const fn pinned(&self) -> bool {
         self.pinned
     }
 
@@ -47,9 +47,8 @@ pub(super) fn try_extract_call(node: &NixNode) -> Option<FetcherCall> {
     }
 
     let op_keys = kind.operational_keys();
-    let attrs = match parse_fetcher_attrset(kind, &arg, &InterpolationSpec::none()) {
-        Ok(a) => a,
-        Err(_) => return None,
+    let Ok(attrs) = parse_fetcher_attrset(kind, &arg, &InterpolationSpec::none()) else {
+        return None;
     };
 
     if attrs
@@ -76,9 +75,8 @@ pub(super) fn try_extract_call(node: &NixNode) -> Option<FetcherCall> {
 /// in which case the corresponding derivation rule owns it, not the
 /// fetcher rule.
 pub(super) fn is_src_of_owned_call(node: &NixNode) -> bool {
-    let mut current = match node.parent() {
-        Some(p) => p,
-        None => return false,
+    let Some(mut current) = node.parent() else {
+        return false;
     };
 
     while current.kind() == rnix::SyntaxKind::NODE_PAREN {
@@ -96,17 +94,15 @@ pub(super) fn is_src_of_owned_call(node: &NixNode) -> bool {
         return false;
     }
 
-    let attr_set = match current.parent() {
-        Some(p) => p,
-        None => return false,
+    let Some(attr_set) = current.parent() else {
+        return false;
     };
     if attr_set.kind() != rnix::SyntaxKind::NODE_ATTR_SET {
         return false;
     }
 
-    let mut apply_node = match attr_set.parent() {
-        Some(p) => p,
-        None => return false,
+    let Some(mut apply_node) = attr_set.parent() else {
+        return false;
     };
     if apply_node.kind() == rnix::SyntaxKind::NODE_LAMBDA {
         apply_node = match apply_node.parent() {
@@ -124,9 +120,8 @@ pub(super) fn is_src_of_owned_call(node: &NixNode) -> bool {
         return false;
     }
 
-    let func_name = match apply_node.apply_function_name() {
-        Some(name) => name,
-        None => return false,
+    let Some(func_name) = apply_node.apply_function_name() else {
+        return false;
     };
     let short_name = func_name.rsplit('.').next().unwrap_or(&func_name);
     OWNED_FUNC_NAMES.contains(&short_name)

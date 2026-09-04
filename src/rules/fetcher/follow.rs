@@ -72,7 +72,7 @@ pub(super) fn resolve_follow(
                         None,
                         vec![CheckWarning::FollowBranchNotFound {
                             git_url: git_url.to_string(),
-                            branch: branch.to_string(),
+                            branch: branch.clone(),
                         }],
                     );
                 }

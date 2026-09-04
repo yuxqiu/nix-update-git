@@ -11,11 +11,13 @@ use walkdir::WalkDir;
 fn parse_redact_directive(nix_path: &Path) -> HashSet<String> {
     let content = fs::read_to_string(nix_path).unwrap_or_default();
     let first_line = content.lines().next().unwrap_or("");
-    if let Some(rest) = first_line.strip_prefix("# redact:") {
-        rest.split_whitespace().map(|s| s.to_string()).collect()
-    } else {
-        HashSet::new()
-    }
+    first_line
+        .strip_prefix("# redact:")
+        .map_or_else(HashSet::new, |rest| {
+            rest.split_whitespace()
+                .map(std::string::ToString::to_string)
+                .collect()
+        })
 }
 
 /// Check if the `.nix` file has a `# ignored` directive on its first line.
@@ -52,11 +54,11 @@ fn render_snapshot(nix_path: &Path, redact_fields: &HashSet<String>) -> Result<S
 fn discover_nix_files(data_dir: &Path) -> Vec<PathBuf> {
     let mut files: Vec<PathBuf> = WalkDir::new(data_dir)
         .into_iter()
-        .filter_map(|entry| entry.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|entry| {
             entry.file_type().is_file() && entry.path().extension().is_some_and(|ext| ext == "nix")
         })
-        .map(|entry| entry.into_path())
+        .map(walkdir::DirEntry::into_path)
         .collect();
     files.sort();
     files

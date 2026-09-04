@@ -4,8 +4,10 @@ use crate::checker::FileResult;
 use crate::rules::Update;
 
 /// A diff-style view of the updates found in one file, independent of which
-/// rule produced them. Rule identity is kept on each `Hunk` (for `--verbose`
-/// output and tests) but is not part of the default rendering.
+/// rule produced them.
+///
+/// Rule identity is kept on each `Hunk` (for `--verbose` output and tests)
+/// but is not part of the default rendering.
 pub struct FileDiff {
     pub path: PathBuf,
     pub hunks: Vec<Hunk>,
@@ -34,6 +36,7 @@ fn sanitize(s: &str) -> String {
 }
 
 impl FileDiff {
+    #[must_use]
     pub fn from_result(fr: &FileResult) -> Self {
         let hunks = fr
             .updates_per_rule
@@ -60,7 +63,7 @@ impl FileDiff {
             })
             .collect();
 
-        FileDiff {
+        Self {
             path: fr.file_path.clone(),
             hunks,
         }

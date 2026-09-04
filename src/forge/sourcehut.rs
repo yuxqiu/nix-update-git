@@ -48,13 +48,11 @@ impl Forge for SourceHut {
         let domain = parsed
             .strings
             .get("domain")
-            .map(|s| s.as_str())
-            .unwrap_or("sr.ht");
+            .map_or("sr.ht", std::string::String::as_str);
         let vc = parsed
             .strings
             .get("vc")
-            .map(|s| s.as_str())
-            .unwrap_or("git");
+            .map_or("git", std::string::String::as_str);
         Some(format!("https://{}.{}/{}/{}", vc, domain, owner, repo))
     }
 
@@ -65,13 +63,11 @@ impl Forge for SourceHut {
         let domain = parsed
             .strings
             .get("domain")
-            .map(|s| s.as_str())
-            .unwrap_or("sr.ht");
+            .map_or("sr.ht", std::string::String::as_str);
         let vc = parsed
             .strings
             .get("vc")
-            .map(|s| s.as_str())
-            .unwrap_or("git");
+            .map_or("git", std::string::String::as_str);
         Some(format!("{}.{}/{}/{}", vc, domain, owner, repo))
     }
 
@@ -88,13 +84,11 @@ impl Forge for SourceHut {
         let domain = parsed
             .strings
             .get("domain")
-            .map(|s| s.as_str())
-            .unwrap_or("sr.ht");
+            .map_or("sr.ht", std::string::String::as_str);
         let vc = parsed
             .strings
             .get("vc")
-            .map(|s| s.as_str())
-            .unwrap_or("git");
+            .map_or("git", std::string::String::as_str);
         Ok(format!(
             "https://{}.{}/{}/{}/archive/{}.tar.gz",
             vc, domain, owner, repo, rev

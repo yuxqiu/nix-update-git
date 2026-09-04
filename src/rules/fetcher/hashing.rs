@@ -20,7 +20,7 @@ fn resolve_rev(call: &FetcherCall, git_url: &str) -> Option<String> {
 /// `kind`. Shared by the fetcher rule (via `compute_hash` below) and by
 /// `rules::derivation::hashing::compute_hash`, which mirrors the same
 /// dispatch for derivation-rule call sites.
-pub(crate) fn dispatch_hash_strategy(
+pub fn dispatch_hash_strategy(
     kind: &FetcherKind,
     parsed: &ParsedAttrs,
     rev: &str,
@@ -49,7 +49,7 @@ pub(crate) fn dispatch_hash_strategy(
 /// in `parsed`. Shared by the fetcher rule (below) and
 /// `rules::derivation::resolve`, which produces the same pair of updates
 /// from its own `NarHash` result.
-pub(crate) fn push_hash_updates(
+pub fn push_hash_updates(
     parsed: &ParsedAttrs,
     kind_name: &str,
     nar_hash: &NarHash,
@@ -115,20 +115,19 @@ pub(super) fn try_prefetch_empty_hash(
         .parsed()
         .strings
         .get("hash")
-        .is_some_and(|h| h.is_empty())
+        .is_some_and(std::string::String::is_empty)
         || call
             .parsed()
             .strings
             .get("sha256")
-            .is_some_and(|h| h.is_empty());
+            .is_some_and(std::string::String::is_empty);
 
     if !has_empty_hash {
         return (true, vec![]);
     }
 
-    if let Some(rev) = resolve_rev(call, git_url) {
-        try_prefetch_hash(call, &rev, updates)
-    } else {
-        (true, vec![])
-    }
+    resolve_rev(call, git_url).map_or_else(
+        || (true, vec![]),
+        |rev| try_prefetch_hash(call, &rev, updates),
+    )
 }

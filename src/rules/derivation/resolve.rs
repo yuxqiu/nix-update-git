@@ -33,9 +33,8 @@ pub(super) fn check_derivation_call(rule_name: &str, call: &DerivationCall) -> C
         return CheckResult::empty();
     }
 
-    let git_url = match call.fetcher_kind().git_url(call.fetcher_parsed()) {
-        Some(url) => url,
-        None => return CheckResult::empty(),
+    let Some(git_url) = call.fetcher_kind().git_url(call.fetcher_parsed()) else {
+        return CheckResult::empty();
     };
 
     let mut updates = Vec::new();
@@ -55,7 +54,7 @@ pub(super) fn check_derivation_call(rule_name: &str, call: &DerivationCall) -> C
                         if VersionDetector::compare(current_ref, &latest)
                             == std::cmp::Ordering::Less =>
                     {
-                        target_version = latest.clone();
+                        target_version.clone_from(&latest);
                         new_source_ref_text = Some(latest);
                     }
                     Ok(_) => {}
@@ -73,7 +72,7 @@ pub(super) fn check_derivation_call(rule_name: &str, call: &DerivationCall) -> C
                         if VersionDetector::compare(call.version_value(), &latest)
                             == std::cmp::Ordering::Less =>
                     {
-                        target_version = latest.clone();
+                        target_version.clone_from(&latest);
                         new_source_ref_text = GitFetcher::resolve_ref_to_sha(&git_url, &latest)
                             .ok()
                             .flatten();
@@ -95,7 +94,7 @@ pub(super) fn check_derivation_call(rule_name: &str, call: &DerivationCall) -> C
                     if VersionDetector::compare(call.version_value(), &latest)
                         == std::cmp::Ordering::Less =>
                 {
-                    target_version = latest.clone();
+                    target_version.clone_from(&latest);
                     new_source_ref_text = Some(latest);
                 }
                 Ok(_) => {
@@ -209,17 +208,15 @@ pub(super) fn check_derivation_call(rule_name: &str, call: &DerivationCall) -> C
         call.fetcher_kind().needs_hash() && (hash_empty || effective_ref_changed);
     let mut hash_failed = false;
     if should_refresh_hash {
-        let rev_for_hash = if let Some(new_ref_text) = new_source_ref_text.as_ref() {
-            resolve_ref_for_prefetch(&git_url, new_ref_text)
-        } else {
-            match call.source_ref_value() {
+        let rev_for_hash = new_source_ref_text.as_ref().map_or_else(
+            || match call.source_ref_value() {
                 SourceRefValue::Pure(reference) => resolve_ref_for_prefetch(&git_url, reference),
                 SourceRefValue::InterpolatedFromVersion {
                     template_node,
                     version_var,
                 } => {
                     let mut vars = call.extra_vars().clone();
-                    vars.insert(version_var.clone(), target_version.clone());
+                    vars.insert(version_var.clone(), target_version);
                     template_node
                         .interpolated_string_content(&vars)
                         .and_then(|resolved| resolve_ref_for_prefetch(&git_url, &resolved))
@@ -228,8 +225,9 @@ pub(super) fn check_derivation_call(rule_name: &str, call: &DerivationCall) -> C
                     resolve_ref_for_prefetch(&git_url, &target_version)
                 }
                 SourceRefValue::Missing => None,
-            }
-        };
+            },
+            |new_ref_text| resolve_ref_for_prefetch(&git_url, new_ref_text),
+        );
 
         if let Some(rev_for_hash) = rev_for_hash {
             let result = compute_hash(&call.fetcher_kind(), call.fetcher_parsed(), &rev_for_hash);
@@ -244,8 +242,8 @@ pub(super) fn check_derivation_call(rule_name: &str, call: &DerivationCall) -> C
                 }
                 Err(e) => {
                     warnings.push(CheckWarning::HashPrefetchFailed {
-                        url: git_url.clone(),
-                        rev: rev_for_hash.clone(),
+                        url: git_url,
+                        rev: rev_for_hash,
                         source: e,
                     });
                     hash_failed = true;
@@ -253,7 +251,7 @@ pub(super) fn check_derivation_call(rule_name: &str, call: &DerivationCall) -> C
             }
         } else {
             warnings.push(CheckWarning::HashPrefetchFailed {
-                url: git_url.clone(),
+                url: git_url,
                 rev: String::new(),
                 source: anyhow::anyhow!("could not resolve ref for hash computation"),
             });

@@ -51,7 +51,7 @@ fn test_flake_input_with_non_version_ref() {
 #[test]
 fn test_non_flake_file() {
     let temp_dir = tempdir().unwrap();
-    let nix_content = r#"let pkgs = import <nixpkgs> {}; in pkgs.hello"#;
+    let nix_content = r"let pkgs = import <nixpkgs> {}; in pkgs.hello";
     let nix_path = temp_dir.path().join("hello.nix");
     fs::write(&nix_path, nix_content).unwrap();
 

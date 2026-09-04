@@ -9,6 +9,7 @@ pub struct DerivationRule {
 }
 
 impl DerivationRule {
+    #[must_use]
     pub fn new(rule_name: &str, func_names: Vec<String>) -> Self {
         Self {
             rule_name: rule_name.to_string(),
@@ -27,9 +28,8 @@ impl UpdateRule for DerivationRule {
     }
 
     fn check(&self, node: &NixNode) -> CheckResult {
-        let call = match extract::try_extract_call(&self.func_names, node) {
-            Some(call) => call,
-            None => return CheckResult::empty(),
+        let Some(call) = extract::try_extract_call(&self.func_names, node) else {
+            return CheckResult::empty();
         };
 
         let target = call.fetcher_kind().display_target(call.fetcher_parsed());
@@ -37,9 +37,9 @@ impl UpdateRule for DerivationRule {
         let mut result = resolve::check_derivation_call(&self.rule_name, &call);
 
         if !result.groups.is_empty() {
-            for group in result.groups.iter_mut() {
-                for update in group.updates.iter_mut() {
-                    update.target = target.clone();
+            for group in &mut result.groups {
+                for update in &mut group.updates {
+                    update.target.clone_from(&target);
                 }
             }
         }

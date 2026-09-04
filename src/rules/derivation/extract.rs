@@ -27,7 +27,7 @@ impl DerivationCall {
         &self.version_value
     }
 
-    pub(super) fn version_range(&self) -> TextRange {
+    pub(super) const fn version_range(&self) -> TextRange {
         self.version_range
     }
 
@@ -35,27 +35,27 @@ impl DerivationCall {
         self.source_ref_key.as_deref()
     }
 
-    pub(super) fn source_ref_value(&self) -> &SourceRefValue {
+    pub(super) const fn source_ref_value(&self) -> &SourceRefValue {
         &self.source_ref_value
     }
 
-    pub(super) fn source_ref_range(&self) -> Option<TextRange> {
+    pub(super) const fn source_ref_range(&self) -> Option<TextRange> {
         self.source_ref_range
     }
 
-    pub(super) fn fetcher_kind(&self) -> FetcherKind {
+    pub(super) const fn fetcher_kind(&self) -> FetcherKind {
         self.fetcher_kind
     }
 
-    pub(super) fn fetcher_parsed(&self) -> &ParsedAttrs {
+    pub(super) const fn fetcher_parsed(&self) -> &ParsedAttrs {
         &self.fetcher_parsed
     }
 
-    pub(super) fn extra_vars(&self) -> &HashMap<String, String> {
+    pub(super) const fn extra_vars(&self) -> &HashMap<String, String> {
         &self.extra_vars
     }
 
-    pub(super) fn pinned(&self) -> bool {
+    pub(super) const fn pinned(&self) -> bool {
         self.pinned
     }
 }
@@ -179,9 +179,8 @@ pub(super) fn try_extract_call(func_names: &[String], node: &NixNode) -> Option<
         spec.allow("ref", vars);
     }
 
-    let mut attrs = match parse_fetcher_attrset(fetcher_kind, &src_arg, &spec) {
-        Ok(a) => a,
-        Err(_) => return None,
+    let Ok(mut attrs) = parse_fetcher_attrset(fetcher_kind, &src_arg, &spec) else {
+        return None;
     };
 
     let source_ref_keys = ["tag", "rev", "ref"];
@@ -211,7 +210,7 @@ pub(super) fn try_extract_call(func_names: &[String], node: &NixNode) -> Option<
     }
 
     let source_ref_key = crate::rules::fetcher::preferred_ref_key(&attrs.parsed)
-        .map(|k| k.to_string())
+        .map(std::string::ToString::to_string)
         .or_else(|| {
             if attrs.interpolated.contains_key("tag") {
                 Some("tag".to_string())

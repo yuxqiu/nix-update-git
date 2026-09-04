@@ -5,8 +5,9 @@ use crate::forge::{self, Forge, strip_url_scheme};
 use crate::parser::{AttrSpec, AttrType, ParsedAttrs};
 use crate::rules::fetcher::source_url::parse_source_url;
 
-/// A fetcher kind. Most variants wrap a registered `Forge` (see
-/// `crate::forge` for the forge-vs-plain-variant rule); `FetchGit`,
+/// A fetcher kind. Most variants wrap a registered `Forge`.
+///
+/// See `crate::forge` for the forge-vs-plain-variant rule; `FetchGit`,
 /// `BuiltinsFetchGit`, `FetchPatch`, and `FetchTarball` aren't
 /// `fetchFrom<Name>`-named, so they stay as their own variants here instead.
 #[derive(Clone, Copy)]
@@ -244,6 +245,7 @@ impl FetcherKind {
         }
     }
 
+    #[must_use]
     pub fn name(&self) -> &'static str {
         match self {
             Self::Forge(forge) => forge.nixpkgs_fn_name(),
@@ -254,10 +256,12 @@ impl FetcherKind {
         }
     }
 
-    pub fn needs_hash(&self) -> bool {
+    #[must_use]
+    pub const fn needs_hash(&self) -> bool {
         !matches!(self, Self::BuiltinsFetchGit)
     }
 
+    #[must_use]
     pub fn hash_strategy(&self, parsed: &ParsedAttrs, has_sparse_checkout: bool) -> HashStrategy {
         match self {
             Self::BuiltinsFetchGit => HashStrategy::None,
@@ -274,6 +278,7 @@ impl FetcherKind {
         }
     }
 
+    #[must_use]
     pub fn git_url(&self, parsed: &ParsedAttrs) -> Option<String> {
         match self {
             Self::FetchGit | Self::FetchPatch | Self::FetchTarball | Self::BuiltinsFetchGit => {
@@ -283,10 +288,12 @@ impl FetcherKind {
         }
     }
 
+    #[must_use]
     pub fn uses_tarball(&self, parsed: &ParsedAttrs, has_sparse_checkout: bool) -> bool {
         !self.uses_fetchgit(parsed, has_sparse_checkout) && !self.uses_fetch_submodules(parsed)
     }
 
+    #[must_use]
     pub fn uses_fetch_submodules(&self, parsed: &ParsedAttrs) -> bool {
         match self {
             Self::FetchGit | Self::Forge(_) => {
@@ -313,6 +320,7 @@ impl FetcherKind {
         }
     }
 
+    #[must_use]
     pub fn attr_spec(&self) -> &'static [AttrSpec] {
         match self {
             Self::Forge(forge) => forge.attr_spec(),
@@ -323,10 +331,12 @@ impl FetcherKind {
         }
     }
 
+    #[must_use]
     pub fn operational_keys(&self) -> Vec<&'static str> {
         self.attr_spec().iter().map(|s| s.key).collect()
     }
 
+    #[must_use]
     pub fn display_target(&self, parsed: &ParsedAttrs) -> Option<String> {
         match self {
             Self::Forge(forge) => forge.display_target(parsed),

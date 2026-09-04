@@ -44,7 +44,7 @@ fn test_pure_string_content_empty() {
     let attr_set = find_attr_set(&root).unwrap();
     let node = attr_set.find_attr_by_key("foo").unwrap();
     let value = node.attr_value().unwrap();
-    assert_eq!(value.pure_string_content(), Some("".to_string()));
+    assert_eq!(value.pure_string_content(), Some(String::new()));
 }
 
 #[test]
@@ -376,7 +376,7 @@ fn test_interpolated_var_affixes_single_var() {
     let vars = std::collections::HashMap::new();
     assert_eq!(
         value.interpolated_var_affixes("version", &vars),
-        Some(("v".to_string(), "".to_string()))
+        Some(("v".to_string(), String::new()))
     );
 }
 
@@ -391,7 +391,7 @@ fn test_interpolated_var_affixes_multi_var() {
     vars.insert("pname".to_string(), "foo".to_string());
     assert_eq!(
         value.interpolated_var_affixes("version", &vars),
-        Some(("foo-".to_string(), "".to_string()))
+        Some(("foo-".to_string(), String::new()))
     );
 }
 
@@ -483,12 +483,12 @@ fn test_parse_attrs_pure_strings() {
     assert!(parsed.ints.is_empty());
     assert!(parsed.has_string("url"));
     assert!(parsed.has_string("rev"));
-    assert!(parsed.unknown_keys.is_empty());
+    assert_eq!(parsed.unknown_keys, [] as [std::string::String; 0]);
 }
 
 #[test]
 fn test_parse_attrs_bool_values() {
-    let content = r#"{ fetchSubmodules = true; deepClone = false; }"#;
+    let content = r"{ fetchSubmodules = true; deepClone = false; }";
     let root = parse(content);
     let attr_set = find_attr_set(&root).unwrap();
     let spec = &[
@@ -505,7 +505,7 @@ fn test_parse_attrs_bool_values() {
     assert_eq!(parsed.bools.get("fetchSubmodules"), Some(&true));
     assert_eq!(parsed.bools.get("deepClone"), Some(&false));
     assert!(parsed.strings.is_empty());
-    assert!(parsed.unknown_keys.is_empty());
+    assert_eq!(parsed.unknown_keys, [] as [std::string::String; 0]);
 }
 
 #[test]
@@ -648,7 +648,7 @@ fn test_parse_attrs_select_resolution() {
 
 #[test]
 fn test_parse_attrs_select_not_in_vars_returns_error() {
-    let content = r#"{ rev = finalAttrs.version; }"#;
+    let content = r"{ rev = finalAttrs.version; }";
     let root = parse(content);
     let attr_set = find_attr_set(&root).unwrap();
     let spec = &[AttrSpec {
@@ -753,5 +753,5 @@ fn test_parse_attrs_empty_attrset() {
     assert!(parsed.strings.is_empty());
     assert!(parsed.bools.is_empty());
     assert!(parsed.ints.is_empty());
-    assert!(parsed.unknown_keys.is_empty());
+    assert_eq!(parsed.unknown_keys, [] as [std::string::String; 0]);
 }

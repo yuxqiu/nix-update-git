@@ -5,15 +5,18 @@ use crate::parser::ParsedAttrs;
 
 use super::kind::FetcherKind;
 
+/// # Errors
+///
+/// Returns an error if `kind` has no resolvable git URL, or if cloning the
+/// repository and computing its NAR hash fails.
 pub fn compute_hash(
     kind: &FetcherKind,
     parsed: &ParsedAttrs,
     rev: &str,
     sparse_checkout: &[String],
 ) -> Result<NarHash> {
-    let git_url = match kind.git_url(parsed) {
-        Some(url) => url,
-        None => anyhow::bail!("No git URL available"),
+    let Some(git_url) = kind.git_url(parsed) else {
+        anyhow::bail!("No git URL available")
     };
 
     let submodules_key = if kind == &FetcherKind::BuiltinsFetchGit {

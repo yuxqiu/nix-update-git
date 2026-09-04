@@ -1,5 +1,5 @@
-//! Registry of git hosting forges (GitHub, GitLab, Gitea-likes, SourceHut,
-//! Bitbucket, RepoOrCz, Gitiles).
+//! Registry of git hosting forges (GitHub, GitLab, Gitea-likes, `SourceHut`,
+//! Bitbucket, `RepoOrCz`, Gitiles).
 //!
 //! Each forge is one small `Forge` impl registered in `FORGES`. Adding a new
 //! forge means adding one file and one line here — nothing in
@@ -29,8 +29,10 @@ use anyhow::Result;
 use crate::parser::{AttrSpec, AttrType, ParsedAttrs};
 
 /// Attribute keys shared by every forge's fetcher call (`fetchFromGitHub`,
-/// `fetchFromGitLab`, ...): everything except the keys that identify
-/// *which* repo (owner/repo/domain-ish), which each forge composes in via
+/// `fetchFromGitLab`, ...).
+///
+/// Everything except the keys that identify *which* repo
+/// (owner/repo/domain-ish), which each forge composes in via
 /// `compose_attr_spec()`.
 pub const COMMON_GIT_ATTRS: &[AttrSpec] = &[
     AttrSpec {
@@ -107,6 +109,11 @@ pub trait Forge: Sync {
 
     /// Tarball/archive download URL for a given rev (used by the `Tarball`
     /// hash strategy).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `parsed` is missing an attribute required to
+    /// build the URL (e.g. `owner`/`repo`).
     fn archive_url(&self, parsed: &ParsedAttrs, rev: &str) -> Result<String>;
 
     /// Full attribute schema: `COMMON_GIT_ATTRS` plus this forge's own
@@ -117,17 +124,21 @@ pub trait Forge: Sync {
     fn attr_spec(&self) -> &'static [AttrSpec];
 }
 
-/// Composes `COMMON_GIT_ATTRS` with a forge's own attrs. Each `Forge` impl
-/// calls this once, inside a `static ATTR_SPEC: LazyLock<Vec<AttrSpec>>`, to
-/// implement `attr_spec()` — see any forge module for the pattern.
+/// Composes `COMMON_GIT_ATTRS` with a forge's own attrs.
+///
+/// Each `Forge` impl calls this once, inside a `static ATTR_SPEC:
+/// LazyLock<Vec<AttrSpec>>`, to implement `attr_spec()` — see any forge
+/// module for the pattern.
+#[must_use]
 pub fn compose_attr_spec(extra: &'static [AttrSpec]) -> Vec<AttrSpec> {
     COMMON_GIT_ATTRS.iter().chain(extra).cloned().collect()
 }
 
 /// A `Forge` that also supports the `scheme:owner/repo` flake input
-/// shorthand (`github:owner/repo`, `gitlab:owner/repo`, ...). A separate
-/// trait rather than optional `Forge` methods: only some forges support
-/// this, and callers that need it (`flake_input.rs`) should hold a
+/// shorthand (`github:owner/repo`, `gitlab:owner/repo`, ...).
+///
+/// A separate trait rather than optional `Forge` methods: only some forges
+/// support this, and callers that need it (`flake_input.rs`) should hold a
 /// `&dyn FlakeForge` so the methods are provably callable — no runtime
 /// check, no panic path for forges that don't support it.
 pub trait FlakeForge: Forge {
@@ -165,7 +176,7 @@ pub fn find_by_fn_name(name: &str) -> Option<&'static dyn Forge> {
     FORGES.iter().copied().find(|f| f.nixpkgs_fn_name() == name)
 }
 
-/// Normalizes an owner for forges (currently only SourceHut) that require a
+/// Normalizes an owner for forges (currently only `SourceHut`) that require a
 /// `~` prefix, adding it if missing.
 pub(crate) fn ensure_tilde(owner: &str) -> String {
     if owner.starts_with('~') {

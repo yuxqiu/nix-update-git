@@ -62,8 +62,8 @@ pub fn apply_updates(content: &str, updates: &[Update], file_path: &Path) -> Str
             file_path.display()
         );
         eprintln!(
-            r#"  This is likely a bug in nix-update-git (v{}-{}). Please report it at
-  https://github.com/yuxqiu/nix-update-git/issues — include the version, the file(s) involved, and the warnings above."#,
+            r"  This is likely a bug in nix-update-git (v{}-{}). Please report it at
+  https://github.com/yuxqiu/nix-update-git/issues — include the version, the file(s) involved, and the warnings above.",
             env!("CARGO_PKG_VERSION"),
             env!("GIT_HASH")
         );

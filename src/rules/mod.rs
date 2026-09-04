@@ -14,9 +14,10 @@ pub use flake_input::FlakeInputRule;
 pub use traits::{CheckResult, CheckWarning, RuleRegistry, Update, UpdateGroup, UpdateRule};
 
 /// One entry in the rule registry: an id the CLI/tests refer to it by,
-/// whether it's on by default, and how to build it. Adding a rule means
-/// adding one entry here — `main.rs`, `cli.rs`, and the snapshot test
-/// harness all consume `RULES` generically.
+/// whether it's on by default, and how to build it.
+///
+/// Adding a rule means adding one entry here — `main.rs`, `cli.rs`, and the
+/// snapshot test harness all consume `RULES` generically.
 pub struct RuleDescriptor {
     pub id: &'static str,
     pub default_enabled: bool,
@@ -100,6 +101,7 @@ pub const RULES: &[RuleDescriptor] = &[
 pub const ALL_RULES_SENTINEL: &str = "all";
 
 /// Rule ids enabled by default (used as `--rules`' default value).
+#[must_use]
 pub fn default_rule_ids() -> Vec<String> {
     RULES
         .iter()
@@ -109,6 +111,7 @@ pub fn default_rule_ids() -> Vec<String> {
 }
 
 /// All valid `--rules` values: every registered rule id, plus `all`.
+#[must_use]
 pub fn rule_value_names() -> Vec<&'static str> {
     RULES
         .iter()
@@ -120,6 +123,7 @@ pub fn rule_value_names() -> Vec<&'static str> {
 /// Builds a `RuleRegistry` containing the rules named in `requested`
 /// (`"all"` enables every registered rule). Shared by the CLI and by tests
 /// that need the same rule set without going through a subprocess.
+#[must_use]
 pub fn build_registry(requested: &[String]) -> RuleRegistry {
     let all = requested.iter().any(|r| r == ALL_RULES_SENTINEL);
     let mut registry = RuleRegistry::new();

@@ -69,7 +69,7 @@ pub(crate) fn resolve_ref_for_prefetch(_git_url: &str, ref_value: &str) -> Optio
 pub struct FetcherRule;
 
 impl UpdateRule for FetcherRule {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "fetcher"
     }
 
@@ -84,9 +84,8 @@ impl UpdateRule for FetcherRule {
     }
 
     fn check(&self, node: &NixNode) -> CheckResult {
-        let call = match extract::try_extract_call(node) {
-            Some(call) => call,
-            None => return CheckResult::empty(),
+        let Some(call) = extract::try_extract_call(node) else {
+            return CheckResult::empty();
         };
 
         let target = call.kind().display_target(call.parsed());
@@ -100,8 +99,8 @@ impl UpdateRule for FetcherRule {
         };
 
         for group in &mut result.groups {
-            for update in group.updates.iter_mut() {
-                update.target = target.clone();
+            for update in &mut group.updates {
+                update.target.clone_from(&target);
             }
         }
 

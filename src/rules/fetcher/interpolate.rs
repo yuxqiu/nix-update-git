@@ -9,7 +9,7 @@ use super::kind::FetcherKind;
 /// Controls which fetcher fields may contain interpolation: `allow()` for
 /// field-specific bindings, `allow_all()` for catch-all bindings merged on
 /// top, `allow_idents()` for bare ident resolution (e.g. `repo = pname`).
-pub(crate) struct InterpolationSpec {
+pub struct InterpolationSpec {
     allowed: HashMap<String, HashMap<String, String>>,
     allow_all_vars: Option<HashMap<String, String>>,
     ident_vars: HashMap<String, String>,
@@ -50,13 +50,13 @@ impl InterpolationSpec {
     }
 }
 
-pub(crate) struct FetcherAttrs {
+pub struct FetcherAttrs {
     pub parsed: ParsedAttrs,
     pub interpolated: HashMap<String, NixNode>,
     pub interpolated_unresolved: Vec<String>,
 }
 
-pub(crate) fn parse_fetcher_attrset(
+pub fn parse_fetcher_attrset(
     kind: FetcherKind,
     attr_set: &NixNode,
     spec: &InterpolationSpec,
@@ -123,7 +123,10 @@ mod tests {
         assert_eq!(attrs.parsed.strings.get("rev"), Some(&"v1.0".to_string()));
         assert_eq!(attrs.parsed.bools.get("fetchSubmodules"), Some(&true));
         assert!(attrs.interpolated.is_empty());
-        assert!(attrs.interpolated_unresolved.is_empty());
+        assert_eq!(
+            attrs.interpolated_unresolved,
+            [] as [std::string::String; 0]
+        );
         assert!(attrs.parsed.has_string("url"));
         assert!(attrs.parsed.has_string("rev"));
     }
@@ -165,7 +168,10 @@ mod tests {
         let attrs =
             super::parse_fetcher_attrset(super::FetcherKind::FetchGit, &attr_set, &spec).unwrap();
         assert!(attrs.interpolated.contains_key("rev"));
-        assert!(attrs.interpolated_unresolved.is_empty());
+        assert_eq!(
+            attrs.interpolated_unresolved,
+            [] as [std::string::String; 0]
+        );
         assert!(!attrs.parsed.strings.contains_key("rev"));
         assert_eq!(
             attrs.parsed.strings.get("version"),
@@ -211,7 +217,10 @@ mod tests {
         let attrs =
             super::parse_fetcher_attrset(super::FetcherKind::FetchGit, &attr_set, &spec).unwrap();
         assert!(attrs.interpolated.contains_key("rev"));
-        assert!(attrs.interpolated_unresolved.is_empty());
+        assert_eq!(
+            attrs.interpolated_unresolved,
+            [] as [std::string::String; 0]
+        );
         assert!(!attrs.parsed.strings.contains_key("rev"));
         assert_eq!(attrs.parsed.strings.get("owner"), Some(&"test".to_string()));
     }
@@ -235,7 +244,10 @@ mod tests {
         let attrs =
             super::parse_fetcher_attrset(super::FetcherKind::FetchGit, &attr_set, &spec).unwrap();
         assert!(attrs.interpolated.contains_key("rev"));
-        assert!(attrs.interpolated_unresolved.is_empty());
+        assert_eq!(
+            attrs.interpolated_unresolved,
+            [] as [std::string::String; 0]
+        );
         assert!(!attrs.parsed.strings.contains_key("rev"));
         assert_eq!(attrs.parsed.strings.get("owner"), Some(&"test".to_string()));
     }
@@ -401,6 +413,9 @@ mod tests {
         .unwrap();
         assert!(attrs.interpolated.contains_key("rev"));
         assert!(attrs.interpolated.contains_key("owner"));
-        assert!(attrs.interpolated_unresolved.is_empty());
+        assert_eq!(
+            attrs.interpolated_unresolved,
+            [] as [std::string::String; 0]
+        );
     }
 }

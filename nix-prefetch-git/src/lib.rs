@@ -69,7 +69,7 @@ pub enum Error {
     },
     /// Failed to create a temporary directory.
     TempDir(std::io::Error),
-    /// Failed to resolve FETCH_HEAD after a shallow fetch.
+    /// Failed to resolve `FETCH_HEAD` after a shallow fetch.
     FetchHead {
         /// The working directory.
         directory: String,
@@ -85,10 +85,8 @@ pub enum Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Error::GitUnavailable(e) => Some(e),
-            Error::Io(e) => Some(e),
-            Error::NarHash { source, .. } => Some(source),
-            Error::TempDir(e) => Some(e),
+            Self::NarHash { source, .. } => Some(source),
+            Self::GitUnavailable(e) | Self::Io(e) | Self::TempDir(e) => Some(e),
             _ => None,
         }
     }
@@ -97,22 +95,22 @@ impl std::error::Error for Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::GitUnavailable(e) => write!(f, "git is not available: {e}"),
-            Error::GitFailed {
+            Self::GitUnavailable(e) => write!(f, "git is not available: {e}"),
+            Self::GitFailed {
                 command,
                 directory,
                 stderr,
             } => write!(f, "git {command} failed in {directory}: {stderr}"),
-            Error::Io(e) => write!(f, "I/O error: {e}"),
-            Error::NarHash { path, source } => {
+            Self::Io(e) => write!(f, "I/O error: {e}"),
+            Self::NarHash { path, source } => {
                 write!(f, "failed to compute NAR hash for {path}: {source}")
             }
-            Error::TempDir(e) => write!(f, "failed to create temporary directory: {e}"),
-            Error::FetchHead { directory, stderr } => {
+            Self::TempDir(e) => write!(f, "failed to create temporary directory: {e}"),
+            Self::FetchHead { directory, stderr } => {
                 write!(f, "failed to resolve FETCH_HEAD in {directory}: {stderr}")
             }
-            Error::SparseCheckout(msg) => write!(f, "sparse checkout failed: {msg}"),
-            Error::CheckoutDir(path) => {
+            Self::SparseCheckout(msg) => write!(f, "sparse checkout failed: {msg}"),
+            Self::CheckoutDir(path) => {
                 write!(f, "checkout directory does not exist: {path}")
             }
         }
@@ -284,7 +282,10 @@ pub fn prefetch(args: &PrefetchArgs) -> Result<PrefetchResult> {
         git(
             &clone_dir,
             &home_dir,
-            &fetch_args.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+            &fetch_args
+                .iter()
+                .map(std::string::String::as_str)
+                .collect::<Vec<_>>(),
         )?;
         false
     } else {
@@ -434,7 +435,7 @@ pub fn prefetch(args: &PrefetchArgs) -> Result<PrefetchResult> {
     // --- Compute NAR hash --------------------------------------------------
     let hash_dir = match &args.root_dir {
         Some(subdir) => clone_dir.join(subdir),
-        None => clone_dir.to_path_buf(),
+        None => clone_dir,
     };
 
     // The checkout directory may have been moved/deleted by cleanup,
@@ -506,8 +507,7 @@ fn git_quiet(dir: &Path, home_dir: &TempDir, args: &[&str]) -> bool {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
-        .ok()
-        .is_some_and(|s| s.success())
+        .is_ok_and(|s| s.success())
 }
 
 /// Run a git command and capture its stdout.

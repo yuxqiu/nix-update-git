@@ -9,6 +9,10 @@ use nix_prefetch_git::{NarHash, nar::hash_path};
 pub struct TarballHasher;
 
 impl TarballHasher {
+    /// # Errors
+    ///
+    /// Returns an error if downloading, unpacking, or NAR-hashing the
+    /// tarball at `url` fails.
     pub fn hash_tarball_url(url: &str) -> Result<NarHash> {
         let tarball_bytes = Self::download(url)?;
         let dir = tempfile::tempdir().context("Failed to create temp directory")?;

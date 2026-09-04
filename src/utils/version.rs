@@ -5,10 +5,12 @@ use versions::{Chunk, MChunk, Versioning};
 pub struct VersionDetector;
 
 impl VersionDetector {
+    #[must_use]
     pub fn is_version(s: &str) -> bool {
         Self::parse(s).is_some()
     }
 
+    #[must_use]
     pub fn compare(a: &str, b: &str) -> Ordering {
         let version_a = Self::parse(a);
         let version_b = Self::parse(b);
@@ -20,6 +22,7 @@ impl VersionDetector {
         }
     }
 
+    #[must_use]
     pub fn latest_matching<'a>(versions: &'a [&str], current: &str) -> Option<&'a str> {
         versions
             .iter()
@@ -29,6 +32,7 @@ impl VersionDetector {
             .copied()
     }
 
+    #[must_use]
     pub fn latest<'a>(versions: &'a [&str]) -> Option<&'a str> {
         versions
             .iter()
@@ -42,13 +46,11 @@ impl VersionDetector {
             return false;
         }
 
-        let va = match Self::parse(a) {
-            Some(v) => v,
-            None => return false,
+        let Some(va) = Self::parse(a) else {
+            return false;
         };
-        let vb = match Self::parse(b) {
-            Some(v) => v,
-            None => return false,
+        let Some(vb) = Self::parse(b) else {
+            return false;
         };
 
         match (&va, &vb) {
@@ -98,6 +100,7 @@ impl VersionDetector {
         }
     }
 
+    #[must_use]
     pub fn prefix(s: &str) -> &str {
         let end = s.find(|c: char| c.is_ascii_digit()).unwrap_or(s.len());
         &s[..end]

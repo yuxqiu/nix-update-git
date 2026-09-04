@@ -14,8 +14,8 @@ pub enum NixError {
 impl std::fmt::Display for NixError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            NixError::ParseError(msg) => write!(f, "Parse error: {}", msg),
-            NixError::InvalidNode(msg) => write!(f, "Invalid node: {}", msg),
+            Self::ParseError(msg) => write!(f, "Parse error: {}", msg),
+            Self::InvalidNode(msg) => write!(f, "Invalid node: {}", msg),
         }
     }
 }
@@ -28,13 +28,16 @@ pub struct NixFile {
 }
 
 impl NixFile {
+    /// # Errors
+    ///
+    /// Returns an error if `content` fails to parse as Nix.
     pub fn parse(content: &str) -> Result<Self, NixError> {
         let parse_result = rnix::Root::parse(content);
         if !parse_result.errors().is_empty() {
             let error_msgs: Vec<String> = parse_result
                 .errors()
                 .iter()
-                .map(|e| e.to_string())
+                .map(std::string::ToString::to_string)
                 .collect();
             return Err(NixError::ParseError(error_msgs.join(", ")));
         }
@@ -45,10 +48,12 @@ impl NixFile {
         })
     }
 
+    #[must_use]
     pub fn source(&self) -> &str {
         &self.source
     }
 
+    #[must_use]
     pub fn root_node(&self) -> NixNode {
         NixNode::new(self.root.syntax().clone(), self.source.clone())
     }
@@ -76,39 +81,38 @@ fn syntax_node_text_trimmed(node: &rnix::SyntaxNode) -> String {
     node.text().to_string().trim().to_string()
 }
 
+fn collect_from_attrpath(node: &rnix::SyntaxNode, parts: &mut Vec<String>) {
+    for child in node.children() {
+        if child.kind() == rnix::SyntaxKind::NODE_IDENT {
+            parts.push(syntax_node_text_trimmed(&child));
+        } else if child.kind() == rnix::SyntaxKind::NODE_SELECT {
+            collect_select_parts(&child, parts);
+        }
+    }
+}
+
+fn collect_select_parts(node: &rnix::SyntaxNode, parts: &mut Vec<String>) {
+    let children: Vec<_> = node.children().collect();
+    if children.len() >= 2 {
+        let first = &children[0];
+        let last = &children[children.len() - 1];
+
+        if first.kind() == rnix::SyntaxKind::NODE_SELECT {
+            collect_select_parts(first, parts);
+        } else if first.kind() == rnix::SyntaxKind::NODE_IDENT {
+            parts.push(syntax_node_text_trimmed(first));
+        }
+
+        if last.kind() == rnix::SyntaxKind::NODE_ATTRPATH {
+            collect_from_attrpath(last, parts);
+        } else if last.kind() == rnix::SyntaxKind::NODE_IDENT {
+            parts.push(syntax_node_text_trimmed(last));
+        }
+    }
+}
+
 fn collect_select_path(node: &rnix::SyntaxNode) -> Vec<String> {
     let mut parts = Vec::new();
-
-    fn collect_from_attrpath(node: &rnix::SyntaxNode, parts: &mut Vec<String>) {
-        for child in node.children() {
-            if child.kind() == rnix::SyntaxKind::NODE_IDENT {
-                parts.push(syntax_node_text_trimmed(&child));
-            } else if child.kind() == rnix::SyntaxKind::NODE_SELECT {
-                collect_select_parts(&child, parts);
-            }
-        }
-    }
-
-    fn collect_select_parts(node: &rnix::SyntaxNode, parts: &mut Vec<String>) {
-        let children: Vec<_> = node.children().collect();
-        if children.len() >= 2 {
-            let first = &children[0];
-            let last = &children[children.len() - 1];
-
-            if first.kind() == rnix::SyntaxKind::NODE_SELECT {
-                collect_select_parts(first, parts);
-            } else if first.kind() == rnix::SyntaxKind::NODE_IDENT {
-                parts.push(syntax_node_text_trimmed(first));
-            }
-
-            if last.kind() == rnix::SyntaxKind::NODE_ATTRPATH {
-                collect_from_attrpath(last, parts);
-            } else if last.kind() == rnix::SyntaxKind::NODE_IDENT {
-                parts.push(syntax_node_text_trimmed(last));
-            }
-        }
-    }
-
     collect_select_parts(node, &mut parts);
     parts
 }
@@ -120,29 +124,35 @@ pub struct NixNode {
 }
 
 impl NixNode {
-    pub fn new(node: rnix::SyntaxNode, source: Arc<str>) -> Self {
+    #[must_use]
+    pub const fn new(node: rnix::SyntaxNode, source: Arc<str>) -> Self {
         Self { node, source }
     }
 
+    #[must_use]
     pub fn kind(&self) -> rnix::SyntaxKind {
         self.node.kind()
     }
 
+    #[must_use]
     pub fn text(&self) -> String {
         self.node.text().to_string()
     }
 
+    #[must_use]
     pub fn text_trimmed(&self) -> String {
         self.node.text().to_string().trim().to_string()
     }
 
-    pub fn children(&self) -> Vec<NixNode> {
+    #[must_use]
+    pub fn children(&self) -> Vec<Self> {
         self.node
             .children()
-            .map(|child| NixNode::new(child, self.source.clone()))
+            .map(|child| Self::new(child, self.source.clone()))
             .collect()
     }
 
+    #[must_use]
     pub fn traverse(&self) -> NixNodeIterator {
         NixNodeIterator {
             stack: vec![self.clone()],
@@ -152,7 +162,7 @@ impl NixNode {
     // -- Private helpers ---------------------------------------------------
 
     /// Find the first direct child of a specific syntax kind.
-    fn find_child(&self, kind: rnix::SyntaxKind) -> Option<NixNode> {
+    fn find_child(&self, kind: rnix::SyntaxKind) -> Option<Self> {
         self.children().into_iter().find(|c| c.kind() == kind)
     }
 
@@ -186,10 +196,12 @@ impl NixNode {
 
     // -- Public API -------------------------------------------------------
 
+    #[must_use]
     pub fn has_pin_comment(&self) -> bool {
         self.find_comment(|c| (c == "pin").then_some(())).is_some()
     }
 
+    #[must_use]
     pub fn attrpath_segments(&self) -> Vec<String> {
         if self.kind() != rnix::SyntaxKind::NODE_ATTRPATH_VALUE {
             return vec![];
@@ -205,7 +217,8 @@ impl NixNode {
             .unwrap_or_default()
     }
 
-    pub fn attr_value(&self) -> Option<NixNode> {
+    #[must_use]
+    pub fn attr_value(&self) -> Option<Self> {
         if self.kind() != rnix::SyntaxKind::NODE_ATTRPATH_VALUE {
             return None;
         }
@@ -214,6 +227,7 @@ impl NixNode {
             .find(|c| VALUE_KINDS.contains(&c.kind()))
     }
 
+    #[must_use]
     pub fn pure_string_content(&self) -> Option<String> {
         let parts = self.string_parts()?;
         let mut result = String::new();
@@ -226,6 +240,7 @@ impl NixNode {
         Some(result)
     }
 
+    #[must_use]
     pub fn interpolated_string_content(&self, vars: &HashMap<String, String>) -> Option<String> {
         let parts = self.string_parts()?;
         let mut result = String::new();
@@ -254,6 +269,7 @@ impl NixNode {
     /// Returns `None` if the target variable appears more than once,
     /// does not appear at all, or a non-target variable is not in
     /// `vars`.
+    #[must_use]
     pub fn interpolated_var_affixes(
         &self,
         var_name: &str,
@@ -294,7 +310,8 @@ impl NixNode {
         seen_var.then_some((prefix, suffix))
     }
 
-    pub fn find_attr_by_key(&self, key: &str) -> Option<NixNode> {
+    #[must_use]
+    pub fn find_attr_by_key(&self, key: &str) -> Option<Self> {
         if self.kind() != rnix::SyntaxKind::NODE_ATTR_SET {
             return None;
         }
@@ -304,17 +321,20 @@ impl NixNode {
         })
     }
 
+    #[must_use]
     pub fn find_string_value(&self, key: &str) -> Option<String> {
         self.find_attr_by_key(key)?
             .attr_value()?
             .pure_string_content()
     }
 
-    pub fn find_string_node(&self, key: &str) -> Option<NixNode> {
+    #[must_use]
+    pub fn find_string_node(&self, key: &str) -> Option<Self> {
         let value = self.find_attr_by_key(key)?.attr_value()?;
         (value.kind() == rnix::SyntaxKind::NODE_STRING).then_some(value)
     }
 
+    #[must_use]
     pub fn find_bool_value(&self, key: &str) -> Option<bool> {
         let value = self.find_attr_by_key(key)?.attr_value()?;
         match value.kind() {
@@ -327,6 +347,11 @@ impl NixNode {
         }
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if an attribute in `spec` doesn't match its declared
+    /// `AttrType`, or if resolving a bare-ident/select value against
+    /// `ident_vars` fails.
     pub fn parse_attrs(
         &self,
         spec: &[AttrSpec],
@@ -342,9 +367,9 @@ impl NixNode {
         let mut strings: HashMap<String, String> = HashMap::new();
         let mut bools: HashMap<String, bool> = HashMap::new();
         let mut ints: HashMap<String, i64> = HashMap::new();
-        let mut list_strings: HashMap<String, Vec<NixNode>> = HashMap::new();
+        let mut list_strings: HashMap<String, Vec<Self>> = HashMap::new();
         let mut list_ints: HashMap<String, Vec<i64>> = HashMap::new();
-        let mut string_nodes: HashMap<String, NixNode> = HashMap::new();
+        let mut string_nodes: HashMap<String, Self> = HashMap::new();
         let mut ident_resolved: HashMap<String, String> = HashMap::new();
         let mut unknown_keys: Vec<String> = Vec::new();
 
@@ -361,169 +386,166 @@ impl NixNode {
                 continue;
             };
 
-            match known_keys.get(key.as_str()) {
-                Some(attr_type) => {
-                    let actual_kind = value.kind();
-                    match attr_type {
-                        AttrType::String => {
-                            if actual_kind == rnix::SyntaxKind::NODE_STRING {
-                                string_nodes.insert(key.clone(), value.clone());
-                                if let Some(content) = value.pure_string_content() {
-                                    strings.insert(key, content);
+            if let Some(attr_type) = known_keys.get(key.as_str()) {
+                let actual_kind = value.kind();
+                match attr_type {
+                    AttrType::String => {
+                        if actual_kind == rnix::SyntaxKind::NODE_STRING {
+                            string_nodes.insert(key.clone(), value.clone());
+                            if let Some(content) = value.pure_string_content() {
+                                strings.insert(key, content);
+                            }
+                        } else if actual_kind == rnix::SyntaxKind::NODE_IDENT {
+                            let trimmed = value.text_trimmed();
+                            if trimmed == "true" || trimmed == "false" {
+                                return Err(anyhow!(
+                                    "key \"{}\" expected string but found bool",
+                                    key
+                                ));
+                            } else if let Some(iv) = ident_vars
+                                && let Some(resolved) = iv.get(trimmed.as_str())
+                            {
+                                strings.insert(key.clone(), resolved.clone());
+                                ident_resolved.insert(key, trimmed);
+                            } else {
+                                return Err(anyhow!(
+                                    "key \"{}\" expected string but found ident '{}'",
+                                    key,
+                                    trimmed
+                                ));
+                            }
+                        } else if actual_kind == rnix::SyntaxKind::NODE_SELECT {
+                            let parts = collect_select_path(&value.node);
+                            let dotted = parts.join(".");
+                            if let Some(iv) = ident_vars
+                                && let Some(resolved) = iv.get(dotted.as_str())
+                            {
+                                strings.insert(key.clone(), resolved.clone());
+                                ident_resolved.insert(key, dotted);
+                            } else {
+                                return Err(anyhow!(
+                                    "key \"{}\" expected string but found select '{}'",
+                                    key,
+                                    dotted
+                                ));
+                            }
+                        } else {
+                            return Err(anyhow!(
+                                "key \"{}\" expected string but found {:?}",
+                                key,
+                                actual_kind
+                            ));
+                        }
+                    }
+                    AttrType::Bool => {
+                        if actual_kind == rnix::SyntaxKind::NODE_IDENT {
+                            let trimmed = value.text_trimmed();
+                            match trimmed.as_str() {
+                                "true" => {
+                                    bools.insert(key, true);
                                 }
-                            } else if actual_kind == rnix::SyntaxKind::NODE_IDENT {
-                                let trimmed = value.text_trimmed();
-                                if trimmed == "true" || trimmed == "false" {
+                                "false" => {
+                                    bools.insert(key, false);
+                                }
+                                _ => {
                                     return Err(anyhow!(
-                                        "key \"{}\" expected string but found bool",
-                                        key
-                                    ));
-                                } else if let Some(iv) = ident_vars
-                                    && let Some(resolved) = iv.get(trimmed.as_str())
-                                {
-                                    strings.insert(key.clone(), resolved.clone());
-                                    ident_resolved.insert(key, trimmed);
-                                } else {
-                                    return Err(anyhow!(
-                                        "key \"{}\" expected string but found ident '{}'",
+                                        "key \"{}\" expected bool but found ident '{}'",
                                         key,
                                         trimmed
                                     ));
                                 }
-                            } else if actual_kind == rnix::SyntaxKind::NODE_SELECT {
-                                let parts = collect_select_path(&value.node);
-                                let dotted = parts.join(".");
-                                if let Some(iv) = ident_vars
-                                    && let Some(resolved) = iv.get(dotted.as_str())
-                                {
-                                    strings.insert(key.clone(), resolved.clone());
-                                    ident_resolved.insert(key, dotted);
-                                } else {
-                                    return Err(anyhow!(
-                                        "key \"{}\" expected string but found select '{}'",
-                                        key,
-                                        dotted
-                                    ));
-                                }
+                            }
+                        } else {
+                            return Err(anyhow!(
+                                "key \"{}\" expected bool but found {:?}",
+                                key,
+                                actual_kind
+                            ));
+                        }
+                    }
+                    AttrType::Int => {
+                        if actual_kind == rnix::SyntaxKind::NODE_LITERAL {
+                            let trimmed = value.text_trimmed();
+                            if let Ok(num) = trimmed.parse::<i64>() {
+                                ints.insert(key, num);
                             } else {
                                 return Err(anyhow!(
-                                    "key \"{}\" expected string but found {:?}",
-                                    key,
-                                    actual_kind
+                                    "key \"{}\" expected int but found non-numeric literal",
+                                    key
                                 ));
                             }
+                        } else {
+                            return Err(anyhow!(
+                                "key \"{}\" expected int but found {:?}",
+                                key,
+                                actual_kind
+                            ));
                         }
-                        AttrType::Bool => {
-                            if actual_kind == rnix::SyntaxKind::NODE_IDENT {
-                                let trimmed = value.text_trimmed();
-                                match trimmed.as_str() {
-                                    "true" => {
-                                        bools.insert(key, true);
-                                    }
-                                    "false" => {
-                                        bools.insert(key, false);
-                                    }
-                                    _ => {
-                                        return Err(anyhow!(
-                                            "key \"{}\" expected bool but found ident '{}'",
-                                            key,
-                                            trimmed
-                                        ));
-                                    }
+                    }
+                    AttrType::ListString => {
+                        if actual_kind == rnix::SyntaxKind::NODE_LIST {
+                            let mut items = Vec::new();
+                            for item in value.children() {
+                                if item.kind() == rnix::SyntaxKind::NODE_STRING {
+                                    items.push(item);
                                 }
-                            } else {
-                                return Err(anyhow!(
-                                    "key \"{}\" expected bool but found {:?}",
-                                    key,
-                                    actual_kind
-                                ));
                             }
+                            list_strings.insert(key.clone(), items);
+                        } else {
+                            return Err(anyhow!(
+                                "key \"{}\" expected list of strings but found {:?}",
+                                key,
+                                actual_kind
+                            ));
                         }
-                        AttrType::Int => {
-                            if actual_kind == rnix::SyntaxKind::NODE_LITERAL {
-                                let trimmed = value.text_trimmed();
-                                if let Ok(num) = trimmed.parse::<i64>() {
-                                    ints.insert(key, num);
-                                } else {
-                                    return Err(anyhow!(
-                                        "key \"{}\" expected int but found non-numeric literal",
-                                        key
-                                    ));
-                                }
-                            } else {
-                                return Err(anyhow!(
-                                    "key \"{}\" expected int but found {:?}",
-                                    key,
-                                    actual_kind
-                                ));
-                            }
-                        }
-                        AttrType::ListString => {
-                            if actual_kind == rnix::SyntaxKind::NODE_LIST {
-                                let mut items = Vec::new();
-                                for item in value.children() {
-                                    if item.kind() == rnix::SyntaxKind::NODE_STRING {
-                                        items.push(item);
-                                    }
-                                }
-                                list_strings.insert(key.clone(), items);
-                            } else {
-                                return Err(anyhow!(
-                                    "key \"{}\" expected list of strings but found {:?}",
-                                    key,
-                                    actual_kind
-                                ));
-                            }
-                        }
-                        AttrType::ListInt => {
-                            if actual_kind == rnix::SyntaxKind::NODE_LIST {
-                                let mut items = Vec::new();
-                                for item in value.children() {
-                                    if item.kind() == rnix::SyntaxKind::NODE_LITERAL {
-                                        if let Ok(num) = item.text_trimmed().parse::<i64>() {
-                                            items.push(num);
-                                        } else {
-                                            return Err(anyhow!(
-                                                "key \"{}\" list contains non-integer item",
-                                                key
-                                            ));
-                                        }
+                    }
+                    AttrType::ListInt => {
+                        if actual_kind == rnix::SyntaxKind::NODE_LIST {
+                            let mut items = Vec::new();
+                            for item in value.children() {
+                                if item.kind() == rnix::SyntaxKind::NODE_LITERAL {
+                                    if let Ok(num) = item.text_trimmed().parse::<i64>() {
+                                        items.push(num);
                                     } else {
                                         return Err(anyhow!(
                                             "key \"{}\" list contains non-integer item",
                                             key
                                         ));
                                     }
+                                } else {
+                                    return Err(anyhow!(
+                                        "key \"{}\" list contains non-integer item",
+                                        key
+                                    ));
                                 }
-                                list_ints.insert(key, items);
-                            } else {
-                                return Err(anyhow!(
-                                    "key \"{}\" expected list of ints but found {:?}",
-                                    key,
-                                    actual_kind
-                                ));
                             }
+                            list_ints.insert(key, items);
+                        } else {
+                            return Err(anyhow!(
+                                "key \"{}\" expected list of ints but found {:?}",
+                                key,
+                                actual_kind
+                            ));
                         }
                     }
                 }
-                None => {
-                    // Unknown key: try to parse as string for maximum
-                    // compatibility, but still report it as unknown.
-                    if value.kind() == rnix::SyntaxKind::NODE_STRING {
-                        string_nodes.insert(key.clone(), value.clone());
-                        if let Some(content) = value.pure_string_content() {
-                            strings.insert(key.clone(), content);
-                        }
-                    } else if value.kind() == rnix::SyntaxKind::NODE_IDENT {
-                        let trimmed = value.text_trimmed();
-                        if trimmed == "true" {
-                            bools.insert(key.clone(), true);
-                        } else if trimmed == "false" {
-                            bools.insert(key.clone(), false);
-                        }
+            } else {
+                // Unknown key: try to parse as string for maximum
+                // compatibility, but still report it as unknown.
+                if value.kind() == rnix::SyntaxKind::NODE_STRING {
+                    string_nodes.insert(key.clone(), value.clone());
+                    if let Some(content) = value.pure_string_content() {
+                        strings.insert(key.clone(), content);
                     }
-                    unknown_keys.push(key);
+                } else if value.kind() == rnix::SyntaxKind::NODE_IDENT {
+                    let trimmed = value.text_trimmed();
+                    if trimmed == "true" {
+                        bools.insert(key.clone(), true);
+                    } else if trimmed == "false" {
+                        bools.insert(key.clone(), false);
+                    }
                 }
+                unknown_keys.push(key);
             }
         }
 
@@ -539,12 +561,14 @@ impl NixNode {
         })
     }
 
-    pub fn parent(&self) -> Option<NixNode> {
+    #[must_use]
+    pub fn parent(&self) -> Option<Self> {
         self.node
             .parent()
-            .map(|p| NixNode::new(p, self.source.clone()))
+            .map(|p| Self::new(p, self.source.clone()))
     }
 
+    #[must_use]
     pub fn text_range(&self) -> TextRange {
         let range = self.node.text_range();
         TextRange {
@@ -553,10 +577,12 @@ impl NixNode {
         }
     }
 
+    #[must_use]
     pub fn follow_comment(&self) -> Option<String> {
         self.find_comment(|c| c.strip_prefix("follow:").map(|s| s.trim().to_string()))
     }
 
+    #[must_use]
     pub fn apply_function_name(&self) -> Option<String> {
         if self.kind() != rnix::SyntaxKind::NODE_APPLY {
             return None;
@@ -573,7 +599,8 @@ impl NixNode {
             })
     }
 
-    pub fn apply_argument(&self) -> Option<NixNode> {
+    #[must_use]
+    pub fn apply_argument(&self) -> Option<Self> {
         if self.kind() != rnix::SyntaxKind::NODE_APPLY {
             return None;
         }
@@ -586,7 +613,8 @@ impl NixNode {
     /// For `f { ... }` this returns the direct `NODE_ATTR_SET` child
     /// (same as `apply_argument`). For `f (x: { ... })` it unwraps
     /// the `NODE_PAREN` → `NODE_LAMBDA` → `NODE_ATTR_SET` layers.
-    pub fn apply_argument_attrset(&self) -> Option<NixNode> {
+    #[must_use]
+    pub fn apply_argument_attrset(&self) -> Option<Self> {
         if self.kind() != rnix::SyntaxKind::NODE_APPLY {
             return None;
         }
@@ -605,6 +633,7 @@ impl NixNode {
     /// lambda `(param: { ... })`, return the lambda parameter name.
     /// Returns `None` if the argument is a direct attrset or if the
     /// pattern doesn't match.
+    #[must_use]
     pub fn apply_lambda_param(&self) -> Option<String> {
         if self.kind() != rnix::SyntaxKind::NODE_APPLY {
             return None;
@@ -640,11 +669,11 @@ pub enum AttrType {
 impl fmt::Display for AttrType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AttrType::String => write!(f, "string"),
-            AttrType::Bool => write!(f, "bool"),
-            AttrType::Int => write!(f, "int"),
-            AttrType::ListString => write!(f, "list of strings"),
-            AttrType::ListInt => write!(f, "list of ints"),
+            Self::String => write!(f, "string"),
+            Self::Bool => write!(f, "bool"),
+            Self::Int => write!(f, "int"),
+            Self::ListString => write!(f, "list of strings"),
+            Self::ListInt => write!(f, "list of ints"),
         }
     }
 }
@@ -668,14 +697,17 @@ pub struct ParsedAttrs {
 }
 
 impl ParsedAttrs {
+    #[must_use]
     pub fn string_range(&self, key: &str) -> Option<TextRange> {
-        self.string_nodes.get(key).map(|n| n.text_range())
+        self.string_nodes.get(key).map(NixNode::text_range)
     }
 
+    #[must_use]
     pub fn has_string(&self, key: &str) -> bool {
         self.string_nodes.contains_key(key)
     }
 
+    #[must_use]
     pub fn pure_string_list(&self, key: &str) -> Option<Vec<String>> {
         self.list_strings.get(key).and_then(|nodes| {
             let mut result = Vec::with_capacity(nodes.len());

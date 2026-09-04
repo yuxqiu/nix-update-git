@@ -7,6 +7,10 @@ use crate::rules::{default_rule_ids, rule_value_names};
 #[command(name = "nix-update-git")]
 #[command(version = concat!("v", env!("CARGO_PKG_VERSION"), "-", env!("GIT_HASH")))]
 #[command(about = "Update git references in Nix flake files and Nix expressions")]
+// Each bool is an independent command-line flag (clap's natural
+// representation for `--check`/`--update`/`--interactive`/`--verbose`), not
+// state that would benefit from an enum.
+#[allow(clippy::struct_excessive_bools)]
 pub struct Cli {
     #[arg(value_hint = clap::ValueHint::AnyPath, help = "Nix files or directories containing .nix files")]
     pub files_or_directories: Vec<std::path::PathBuf>,

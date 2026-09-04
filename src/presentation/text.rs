@@ -1,7 +1,10 @@
+use std::fmt::Write as _;
+
 use super::diff::FileDiff;
 
 /// Renders a file's diff as human-readable text, or `None` if there's
 /// nothing to show. Rule names are only included when `verbose` is set.
+#[must_use]
 pub fn render(diff: &FileDiff, verbose: bool) -> Option<String> {
     if diff.hunks.is_empty() {
         return None;
@@ -22,9 +25,9 @@ pub fn render(diff: &FileDiff, verbose: bool) -> Option<String> {
             out.push('\n');
         }
         for change in &hunk.changes {
-            out.push_str(&format!("    {}\n", change.field));
-            out.push_str(&format!("    - {}\n", change.old));
-            out.push_str(&format!("    + {}\n", change.new));
+            let _ = writeln!(out, "    {}", change.field);
+            let _ = writeln!(out, "    - {}", change.old);
+            let _ = writeln!(out, "    + {}", change.new);
         }
     }
 

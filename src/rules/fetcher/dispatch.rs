@@ -48,7 +48,7 @@ fn handle_following(
     }
 
     if call.parsed().string_range(ref_key(call)).is_some() {
-        (Some(new_sha.clone()), ws)
+        (Some(new_sha), ws)
     } else {
         (None, ws)
     }
@@ -83,9 +83,8 @@ fn handle_version_update(call: &FetcherCall, git_url: &str) -> (Option<String>, 
 }
 
 pub(super) fn check_fetcher_call(call: &FetcherCall) -> CheckResult {
-    let git_url = match call.kind().git_url(call.parsed()) {
-        Some(url) => url,
-        None => return CheckResult::empty(),
+    let Some(git_url) = call.kind().git_url(call.parsed()) else {
+        return CheckResult::empty();
     };
 
     let mut updates = Vec::new();
@@ -222,7 +221,13 @@ pub(super) fn check_fetchpatch_call(call: &FetcherCall) -> CheckResult {
         ));
     }
 
-    let strip_len: usize = call.parsed().ints.get("stripLen").copied().unwrap_or(0) as usize;
+    let strip_len: usize = call
+        .parsed()
+        .ints
+        .get("stripLen")
+        .copied()
+        .and_then(|n| usize::try_from(n).ok())
+        .unwrap_or(0);
 
     let relative = call.parsed().strings.get("relative").cloned();
     let extra_prefix = call.parsed().strings.get("extraPrefix").cloned();
@@ -289,17 +294,17 @@ pub(super) fn check_fetchpatch_call(call: &FetcherCall) -> CheckResult {
             .parsed()
             .strings
             .get("hash")
-            .is_some_and(|h| h.is_empty())
+            .is_some_and(std::string::String::is_empty)
         || call
             .parsed()
             .strings
             .get("sha256")
-            .is_some_and(|h| h.is_empty())
+            .is_some_and(std::string::String::is_empty)
         || call
             .parsed()
             .strings
             .get("outputHash")
-            .is_some_and(|h| h.is_empty()))
+            .is_some_and(std::string::String::is_empty))
         && !has_post_fetch
         && !has_curl_opts
         && !has_curl_opts_list
@@ -332,7 +337,7 @@ pub(super) fn check_fetchpatch_call(call: &FetcherCall) -> CheckResult {
                     .parsed()
                     .list_ints
                     .get("hunks")
-                    .map(|v| v.iter().map(|&i| i as usize).collect())
+                    .map(|v| v.iter().filter_map(|&i| usize::try_from(i).ok()).collect())
                     .unwrap_or_default(),
                 revert,
             };
@@ -363,7 +368,7 @@ pub(super) fn check_fetchpatch_call(call: &FetcherCall) -> CheckResult {
                 }
                 Err(e) => {
                     warnings.push(CheckWarning::HashPrefetchFailed {
-                        url: current_url.clone(),
+                        url: current_url,
                         rev: String::new(),
                         source: e,
                     });
@@ -459,12 +464,12 @@ pub(super) fn check_fetchtarball_call(call: &FetcherCall) -> CheckResult {
             .parsed()
             .strings
             .get("hash")
-            .is_some_and(|h| h.is_empty())
+            .is_some_and(std::string::String::is_empty)
         || call
             .parsed()
             .strings
             .get("sha256")
-            .is_some_and(|h| h.is_empty()))
+            .is_some_and(std::string::String::is_empty))
         && call.kind().needs_hash();
 
     if needs_hash {
@@ -492,7 +497,7 @@ pub(super) fn check_fetchtarball_call(call: &FetcherCall) -> CheckResult {
                 }
                 Err(e) => {
                     warnings.push(CheckWarning::HashPrefetchFailed {
-                        url: current_url.clone(),
+                        url: current_url,
                         rev: String::new(),
                         source: e,
                     });

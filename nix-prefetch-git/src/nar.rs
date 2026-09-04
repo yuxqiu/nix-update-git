@@ -25,6 +25,10 @@ pub struct NarHash {
 /// This serialises the path into the NAR format and hashes the resulting
 /// byte stream with SHA-256. The result is returned in both SRI and
 /// nix-base32 formats.
+///
+/// # Errors
+///
+/// Returns an error if `path` cannot be read or NAR-encoded.
 pub fn hash_path(path: &Path) -> crate::Result<NarHash> {
     let mut encoder = Encoder::new(path).map_err(|e| crate::Error::NarHash {
         path: path.display().to_string(),
@@ -43,6 +47,7 @@ pub fn hash_path(path: &Path) -> crate::Result<NarHash> {
 /// This produces the same hash as `outputHashMode = "flat"` in Nix,
 /// which simply hashes the file content directly (not NAR-serialized).
 /// Used by `fetchurl` and `fetchpatch` which use flat hashing.
+#[must_use]
 pub fn flat_hash(content: &[u8]) -> NarHash {
     let digest = Sha256::digest(content);
     NarHash {
@@ -74,7 +79,7 @@ mod tests {
             result.sri,
             "sha256-RTt0byvWGFjqkJXE1t1DjWlJqmE0rq94KOGojukeD6M="
         );
-        assert!(!result.nix32.is_empty());
+        assert_ne!(result.nix32, "");
     }
 
     #[test]
@@ -95,8 +100,8 @@ mod tests {
 
         let result = hash_path(dir.path()).unwrap();
 
-        assert!(!result.sri.is_empty());
-        assert!(!result.nix32.is_empty());
+        assert_ne!(result.sri, "");
+        assert_ne!(result.nix32, "");
     }
 
     #[test]
@@ -109,8 +114,8 @@ mod tests {
 
         let result = hash_path(dir.path()).unwrap();
 
-        assert!(!result.sri.is_empty());
-        assert!(!result.nix32.is_empty());
+        assert_ne!(result.sri, "");
+        assert_ne!(result.nix32, "");
     }
 
     #[test]

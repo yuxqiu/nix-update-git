@@ -25,10 +25,10 @@ fn expand_inputs(inputs: Vec<PathBuf>) -> Vec<PathBuf> {
                 WalkDir::new(input)
                     .follow_links(false)
                     .into_iter()
-                    .filter_map(|e| e.ok())
+                    .filter_map(std::result::Result::ok)
                     .filter(|e| e.file_type().is_file())
                     .filter(|e| e.path().extension().is_some_and(|ext| ext == "nix"))
-                    .map(|e| e.into_path()),
+                    .map(walkdir::DirEntry::into_path),
             );
         }
     }

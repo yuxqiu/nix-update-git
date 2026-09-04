@@ -1,7 +1,7 @@
 //! URL pattern recognition for source revision following.
 //!
 //! This module parses common source URLs from hosting platforms
-//! (GitHub, GitLab, Gitea/Forgejo/Codeberg, SourceHut, Bitbucket)
+//! (GitHub, GitLab, Gitea/Forgejo/Codeberg, `SourceHut`, Bitbucket)
 //! and extracts the current revision, enabling:
 //!
 //! - **Revision following** via `# follow:<branch>` comments — replace
@@ -49,7 +49,7 @@ pub(crate) enum SourceRefType {
     /// - GitHub:  `/{project}/commit/{sha}[.patch|.diff]`
     /// - GitLab:  `/{project}/-/commit/{sha}[.patch|.diff]`
     /// - Gitea:   `/{project}/commit/{sha}[.patch|.diff]`
-    /// - SourceHut: `/{project}/commit/{sha}[.patch|.mbox]`
+    /// - `SourceHut`: `/{project}/commit/{sha}[.patch|.mbox]`
     /// - Bitbucket: `/{project}/commits/{sha}`
     Commit { sha: String, suffix: String },
     /// A compare / diff range patch URL.
@@ -68,7 +68,7 @@ pub(crate) enum SourceRefType {
     ///   `/{project}/archive/refs/tags/{ref}.tar.gz`
     /// - GitLab:  `/{project}/-/archive/{ref}/{basename}.tar.gz`
     /// - Gitea/Forgejo/Codeberg: `/{project}/archive/{ref}.tar.gz`
-    /// - SourceHut: `/{project}/archive/{ref}.tar.gz`
+    /// - `SourceHut`: `/{project}/archive/{ref}.tar.gz`
     /// - Bitbucket: `/{project}/get/{ref}.tar.gz`
     ///
     /// The `ref` in archive URLs is typically a version tag.
@@ -86,7 +86,7 @@ pub(crate) struct ParsedSourceUrl {
     ///
     /// - GitHub / Gitea / Bitbucket: `owner/repo`
     /// - GitLab: may include subgroups, e.g. `group/subgroup/project`
-    /// - SourceHut: `~owner/repo` (with the `~` prefix)
+    /// - `SourceHut`: `~owner/repo` (with the `~` prefix)
     pub project: String,
     /// For GitLab archive URLs, the repo name extracted from the basename
     /// segment (used for reconstruction). `None` for all other cases.
@@ -141,16 +141,14 @@ impl ParsedSourceUrl {
     fn replace_ref_base(&self, new_ref: &str) -> String {
         match &self.ref_type {
             SourceRefType::Commit { suffix, .. } => match self.platform {
-                SourcePlatform::GitHub | SourcePlatform::Gitea => format!(
-                    "https://{}/{}/commit/{}{}",
-                    self.domain, self.project, new_ref, suffix
-                ),
+                SourcePlatform::GitHub | SourcePlatform::Gitea | SourcePlatform::SourceHut => {
+                    format!(
+                        "https://{}/{}/commit/{}{}",
+                        self.domain, self.project, new_ref, suffix
+                    )
+                }
                 SourcePlatform::GitLab => format!(
                     "https://{}/{}/-/commit/{}{}",
-                    self.domain, self.project, new_ref, suffix
-                ),
-                SourcePlatform::SourceHut => format!(
-                    "https://{}/{}/commit/{}{}",
                     self.domain, self.project, new_ref, suffix
                 ),
                 SourcePlatform::Bitbucket => format!(
@@ -159,7 +157,12 @@ impl ParsedSourceUrl {
                 ),
             },
             SourceRefType::Compare { base, suffix, .. } => match self.platform {
-                SourcePlatform::GitHub | SourcePlatform::Gitea => format!(
+                // SourceHut and Bitbucket compare URLs are less common
+                // but follow the same pattern as GitHub/Gitea if encountered.
+                SourcePlatform::GitHub
+                | SourcePlatform::Gitea
+                | SourcePlatform::SourceHut
+                | SourcePlatform::Bitbucket => format!(
                     "https://{}/{}/compare/{}...{}{}",
                     self.domain, self.project, base, new_ref, suffix
                 ),
@@ -167,18 +170,14 @@ impl ParsedSourceUrl {
                     "https://{}/{}/-/compare/{}...{}{}",
                     self.domain, self.project, base, new_ref, suffix
                 ),
-                // SourceHut and Bitbucket compare URLs are less common
-                // but follow the same pattern if encountered.
-                SourcePlatform::SourceHut | SourcePlatform::Bitbucket => format!(
-                    "https://{}/{}/compare/{}...{}{}",
-                    self.domain, self.project, base, new_ref, suffix
-                ),
             },
             SourceRefType::Archive { suffix, .. } => match self.platform {
-                SourcePlatform::GitHub => format!(
-                    "https://{}/{}/archive/{}{}",
-                    self.domain, self.project, new_ref, suffix
-                ),
+                SourcePlatform::GitHub | SourcePlatform::Gitea | SourcePlatform::SourceHut => {
+                    format!(
+                        "https://{}/{}/archive/{}{}",
+                        self.domain, self.project, new_ref, suffix
+                    )
+                }
                 SourcePlatform::GitLab => {
                     // GitLab archive URLs include the repo name in the path:
                     // /-/archive/{ref}/{repo}-{ref}.tar.gz
@@ -191,14 +190,6 @@ impl ParsedSourceUrl {
                         self.domain, self.project, new_ref, repo, new_ref, suffix
                     )
                 }
-                SourcePlatform::Gitea => format!(
-                    "https://{}/{}/archive/{}{}",
-                    self.domain, self.project, new_ref, suffix
-                ),
-                SourcePlatform::SourceHut => format!(
-                    "https://{}/{}/archive/{}{}",
-                    self.domain, self.project, new_ref, suffix
-                ),
                 SourcePlatform::Bitbucket => format!(
                     "https://{}/{}/get/{}{}",
                     self.domain, self.project, new_ref, suffix
@@ -308,7 +299,7 @@ fn split_archive_suffix(s: &str) -> Option<(String, String)> {
 /// - **Gitea / Forgejo / Codeberg**:
 ///   `/{owner}/{repo}/commit/{sha}[.patch|.diff]`
 ///   and `/{owner}/{repo}/compare/{base}...{head}[.patch|.diff]`
-/// - **SourceHut**: `/{~owner}/{repo}/commit/{sha}[.patch|.mbox]`
+/// - **`SourceHut`**: `/{~owner}/{repo}/commit/{sha}[.patch|.mbox]`
 /// - **Bitbucket**: `/{owner}/{repo}/commits/{sha}`
 ///
 /// **Archive URLs:**
@@ -317,7 +308,7 @@ fn split_archive_suffix(s: &str) -> Option<(String, String)> {
 ///   `/{owner}/{repo}/archive/refs/tags/{ref}.tar.gz`
 /// - **GitLab**: `/{project}/-/archive/{ref}/{basename}.tar.gz`
 /// - **Gitea / Forgejo / Codeberg**: `/{owner}/{repo}/archive/{ref}.tar.gz`
-/// - **SourceHut**: `/{~owner}/{repo}/archive/{ref}.tar.gz`
+/// - **`SourceHut`**: `/{~owner}/{repo}/archive/{ref}.tar.gz`
 /// - **Bitbucket**: `/{owner}/{repo}/get/{ref}.tar.gz`
 pub(crate) fn parse_source_url(url: &str) -> Option<ParsedSourceUrl> {
     let url = url.trim();
@@ -396,7 +387,7 @@ pub(crate) fn parse_patch_url(url: &str) -> Option<ParsedSourceUrl> {
 
 /// Parse `/{project}/commit/{ref}[.ext]` or `/{project}/compare/{base}...{head}[.ext]`.
 ///
-/// Used by GitHub, Gitea/Forgejo/Codeberg, and SourceHut (all share the
+/// Used by GitHub, Gitea/Forgejo/Codeberg, and `SourceHut` (all share the
 /// same path structure for commit/compare URLs).
 fn parse_simple_commit_compare_url(
     path: &str,
@@ -528,7 +519,7 @@ fn parse_bitbucket_url(path: &str, domain: &str, query: String) -> Option<Parsed
 /// Parse `/{project}/archive/{ref}.tar.gz` or
 /// `/{project}/archive/refs/tags/{ref}.tar.gz`.
 ///
-/// Used by GitHub, Gitea/Forgejo/Codeberg, and SourceHut.
+/// Used by GitHub, Gitea/Forgejo/Codeberg, and `SourceHut`.
 fn parse_simple_archive_url(
     path: &str,
     domain: &str,
@@ -546,11 +537,9 @@ fn parse_simple_archive_url(
         let archive_part = &path[idx + 9..]; // after "/archive/"
 
         // GitHub sometimes uses /archive/refs/tags/{ref}.tar.gz
-        let ref_part = if let Some(tags_prefix) = archive_part.strip_prefix("refs/tags/") {
-            tags_prefix
-        } else {
-            archive_part
-        };
+        let ref_part = archive_part
+            .strip_prefix("refs/tags/")
+            .unwrap_or(archive_part);
 
         let (tag_ref, suffix) = split_archive_suffix(ref_part)?;
         return Some(ParsedSourceUrl {
@@ -617,11 +606,7 @@ fn parse_bitbucket_archive_url(path: &str, domain: &str, query: &str) -> Option<
     let ref_part = &path[path.find("/get/").unwrap() + 5..];
 
     // Bitbucket may use /get/refs/tags/{ref}.tar.gz
-    let ref_part = if let Some(tags_prefix) = ref_part.strip_prefix("refs/tags/") {
-        tags_prefix
-    } else {
-        ref_part
-    };
+    let ref_part = ref_part.strip_prefix("refs/tags/").unwrap_or(ref_part);
 
     let (tag_ref, suffix) = split_archive_suffix(ref_part)?;
 

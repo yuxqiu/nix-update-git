@@ -37,32 +37,32 @@ enum FlakeUrl {
 impl std::fmt::Debug for FlakeUrl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FlakeUrl::Forge { forge, owner, repo } => f
+            Self::Forge { forge, owner, repo } => f
                 .debug_struct("Forge")
                 .field("forge", &forge.id())
                 .field("owner", owner)
                 .field("repo", repo)
                 .finish(),
-            FlakeUrl::GitRemote { url } => f.debug_struct("GitRemote").field("url", url).finish(),
-            FlakeUrl::GitLocal { path } => f.debug_struct("GitLocal").field("path", path).finish(),
+            Self::GitRemote { url } => f.debug_struct("GitRemote").field("url", url).finish(),
+            Self::GitLocal { path } => f.debug_struct("GitLocal").field("path", path).finish(),
         }
     }
 }
 
 impl FlakeUrl {
-    fn to_remote_url(&self) -> Option<String> {
+    fn to_remote_url(&self) -> String {
         match self {
-            FlakeUrl::Forge { forge, owner, repo } => Some(forge.remote_url_for_flake(owner, repo)),
-            FlakeUrl::GitRemote { url } => Some(url.clone()),
-            FlakeUrl::GitLocal { path } => Some(path.clone()),
+            Self::Forge { forge, owner, repo } => forge.remote_url_for_flake(owner, repo),
+            Self::GitRemote { url } => url.clone(),
+            Self::GitLocal { path } => path.clone(),
         }
     }
 
     fn display_target(&self) -> String {
         match self {
-            FlakeUrl::Forge { forge, owner, repo } => forge.display_for_flake(owner, repo),
-            FlakeUrl::GitRemote { url } => forge::strip_url_scheme(url).to_string(),
-            FlakeUrl::GitLocal { path } => path.clone(),
+            Self::Forge { forge, owner, repo } => forge.display_for_flake(owner, repo),
+            Self::GitRemote { url } => forge::strip_url_scheme(url).to_string(),
+            Self::GitLocal { path } => path.clone(),
         }
     }
 }
@@ -158,25 +158,26 @@ impl FlakeInputRule {
         rest: &str,
         trim_trailing_slash: bool,
     ) -> (String, Option<String>, Vec<String>) {
-        if let Some(qpos) = rest.find('?') {
-            let mut base = &rest[..qpos];
-            if trim_trailing_slash {
-                base = base.trim_end_matches('/');
-            }
-            let query = &rest[qpos + 1..];
-            let mut inline_ref = None;
-            let mut extra_params = Vec::new();
-            for param in query.split('&') {
-                if let Some(ref_val) = param.strip_prefix("ref=") {
-                    inline_ref = Some(ref_val.to_string());
-                } else {
-                    extra_params.push(param.to_string());
+        rest.find('?').map_or_else(
+            || (rest.to_string(), None, Vec::new()),
+            |qpos| {
+                let mut base = &rest[..qpos];
+                if trim_trailing_slash {
+                    base = base.trim_end_matches('/');
                 }
-            }
-            (base.to_string(), inline_ref, extra_params)
-        } else {
-            (rest.to_string(), None, Vec::new())
-        }
+                let query = &rest[qpos + 1..];
+                let mut inline_ref = None;
+                let mut extra_params = Vec::new();
+                for param in query.split('&') {
+                    if let Some(ref_val) = param.strip_prefix("ref=") {
+                        inline_ref = Some(ref_val.to_string());
+                    } else {
+                        extra_params.push(param.to_string());
+                    }
+                }
+                (base.to_string(), inline_ref, extra_params)
+            },
+        )
     }
 
     fn reconstruct_url(original_url: &str, new_ref: &str) -> Option<String> {
@@ -251,9 +252,8 @@ impl FlakeInputRule {
                     let input_name = segments[1].clone();
                     if let Some(value) = node.attr_value() {
                         if value.kind() == rnix::SyntaxKind::NODE_ATTR_SET {
-                            let parsed = match value.parse_attrs(FLAKE_INPUT_ATTR_SPEC, None) {
-                                Ok(p) => p,
-                                Err(_) => continue,
+                            let Ok(parsed) = value.parse_attrs(FLAKE_INPUT_ATTR_SPEC, None) else {
+                                continue;
                             };
                             let pinned = value.has_pin_comment() || node.has_pin_comment();
                             let url = parsed.string_nodes.get("url").and_then(|n| {
@@ -373,9 +373,8 @@ impl FlakeInputRule {
             if segments.len() == 1 {
                 if let Some(value) = entry.attr_value() {
                     if value.kind() == rnix::SyntaxKind::NODE_ATTR_SET {
-                        let parsed = match value.parse_attrs(FLAKE_INPUT_ATTR_SPEC, None) {
-                            Ok(p) => p,
-                            Err(_) => continue,
+                        let Ok(parsed) = value.parse_attrs(FLAKE_INPUT_ATTR_SPEC, None) else {
+                            continue;
                         };
                         let pinned = value.has_pin_comment() || entry.has_pin_comment();
                         let url = parsed.string_nodes.get("url").and_then(|n| {
@@ -458,7 +457,7 @@ impl FlakeInputRule {
 }
 
 impl UpdateRule for FlakeInputRule {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "flake-input"
     }
 
@@ -470,9 +469,8 @@ impl UpdateRule for FlakeInputRule {
         let mut groups = Vec::new();
         let mut warnings = Vec::new();
 
-        let root_attrs = match Self::find_root_attr_set(node) {
-            Some(attrs) => attrs,
-            None => return CheckResult::empty(),
+        let Some(root_attrs) = Self::find_root_attr_set(node) else {
+            return CheckResult::empty();
         };
 
         let input_defs = Self::collect_inputs_from_root(&root_attrs);
@@ -482,29 +480,23 @@ impl UpdateRule for FlakeInputRule {
                 continue;
             }
 
-            let ref_sv = match &input_def.ref_value {
-                Some(sv) => sv,
-                None => continue,
+            let Some(ref_sv) = &input_def.ref_value else {
+                continue;
             };
 
             if !VersionDetector::is_version(&ref_sv.value) {
                 continue;
             }
 
-            let url_sv = match &input_def.url {
-                Some(sv) => sv,
-                None => continue,
+            let Some(url_sv) = &input_def.url else {
+                continue;
             };
 
-            let parsed = match Self::parse_flake_url(&url_sv.value) {
-                Some(p) => p,
-                None => continue,
+            let Some(parsed) = Self::parse_flake_url(&url_sv.value) else {
+                continue;
             };
 
-            let remote_url = match parsed.flake_url.to_remote_url() {
-                Some(u) => u,
-                None => continue,
-            };
+            let remote_url = parsed.flake_url.to_remote_url();
 
             let target = parsed.flake_url.display_target();
 
@@ -683,10 +675,7 @@ mod tests {
     #[test]
     fn test_gitlocal_to_remote_url() {
         let result = FlakeInputRule::parse_flake_url("git+file:///tmp/repo").unwrap();
-        assert_eq!(
-            result.flake_url.to_remote_url(),
-            Some("/tmp/repo".to_string())
-        );
+        assert_eq!(result.flake_url.to_remote_url(), "/tmp/repo");
     }
 
     #[test]
@@ -698,10 +687,7 @@ mod tests {
         // module's tests). This test just pins down that parsing doesn't
         // strip or reorder anything that would defeat that guard.
         let result = FlakeInputRule::parse_flake_url("git+file://-upload-pack=evil").unwrap();
-        assert_eq!(
-            result.flake_url.to_remote_url(),
-            Some("-upload-pack=evil".to_string())
-        );
+        assert_eq!(result.flake_url.to_remote_url(), "-upload-pack=evil");
     }
 
     #[test]
@@ -712,7 +698,7 @@ mod tests {
         let result = FlakeInputRule::parse_flake_url("sourcehut:~user/repo").unwrap();
         assert_eq!(
             result.flake_url.to_remote_url(),
-            Some("https://git.sr.ht/~user/repo".to_string())
+            "https://git.sr.ht/~user/repo"
         );
     }
 

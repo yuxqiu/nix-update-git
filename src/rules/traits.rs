@@ -22,6 +22,7 @@ impl Update {
         }
     }
 
+    #[must_use]
     pub fn with_target(mut self, target: impl Into<String>) -> Self {
         self.target = Some(target.into());
         self
@@ -29,6 +30,7 @@ impl Update {
 }
 
 /// A group of updates that must be applied atomically.
+///
 /// If any update in the group depends on a computation that fails
 /// (e.g., hash prefetch in flaky network), the entire group is discarded
 /// to avoid leaving the file in an inconsistent state.
@@ -38,11 +40,13 @@ pub struct UpdateGroup {
 }
 
 impl UpdateGroup {
-    pub fn new(updates: Vec<Update>) -> Self {
+    #[must_use]
+    pub const fn new(updates: Vec<Update>) -> Self {
         Self { updates }
     }
 
-    pub fn is_empty(&self) -> bool {
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
         self.updates.is_empty()
     }
 }
@@ -91,7 +95,7 @@ pub enum CheckWarning {
 impl fmt::Display for CheckWarning {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CheckWarning::HashPrefetchFailed { url, rev, source } => {
+            Self::HashPrefetchFailed { url, rev, source } => {
                 if rev.is_empty() {
                     write!(f, "could not prefetch hash for {}: {:#}", url, source)
                 } else {
@@ -102,16 +106,16 @@ impl fmt::Display for CheckWarning {
                     )
                 }
             }
-            CheckWarning::FollowResolutionFailed { git_url, source } => {
+            Self::FollowResolutionFailed { git_url, source } => {
                 write!(f, "could not resolve follow for {}: {:#}", git_url, source)
             }
-            CheckWarning::FollowBranchNotFound { git_url, branch } => {
+            Self::FollowBranchNotFound { git_url, branch } => {
                 write!(f, "could not find branch '{}' for {}", branch, git_url)
             }
-            CheckWarning::FollowRegexNoMatch { git_url, pattern } => {
+            Self::FollowRegexNoMatch { git_url, pattern } => {
                 write!(f, "no tags matching regex '{}' for {}", pattern, git_url)
             }
-            CheckWarning::FollowSemverNoMatch {
+            Self::FollowSemverNoMatch {
                 git_url,
                 requirement,
             } => {
@@ -121,7 +125,7 @@ impl fmt::Display for CheckWarning {
                     requirement, git_url
                 )
             }
-            CheckWarning::InvalidFollowDirective { directive, source } => {
+            Self::InvalidFollowDirective { directive, source } => {
                 write!(f, "invalid follow directive '{}': {:#}", directive, source)
             }
         }
@@ -135,13 +139,15 @@ pub struct CheckResult {
 }
 
 impl CheckResult {
-    pub fn empty() -> Self {
+    #[must_use]
+    pub const fn empty() -> Self {
         Self {
             groups: Vec::new(),
             warnings: Vec::new(),
         }
     }
-    pub fn with_warnings(warnings: Vec<CheckWarning>) -> Self {
+    #[must_use]
+    pub const fn with_warnings(warnings: Vec<CheckWarning>) -> Self {
         Self {
             groups: Vec::new(),
             warnings,
@@ -160,6 +166,7 @@ pub struct RuleRegistry {
 }
 
 impl RuleRegistry {
+    #[must_use]
     pub fn new() -> Self {
         Self { rules: Vec::new() }
     }
@@ -172,14 +179,17 @@ impl RuleRegistry {
         self.rules.push(rule);
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.rules.len()
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.rules.is_empty()
     }
 
+    #[must_use]
     pub fn check_all(
         &self,
         root: &NixNode,
@@ -196,7 +206,7 @@ impl RuleRegistry {
                         let mut groups = groups;
                         for group in &mut groups {
                             for update in &mut group.updates {
-                                update.rule_name = rule_name.clone();
+                                update.rule_name.clone_from(&rule_name);
                             }
                         }
                         results.push((rule_name, groups));

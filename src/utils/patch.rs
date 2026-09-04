@@ -58,6 +58,10 @@ pub struct PatchOptions {
 pub struct PatchHasher;
 
 impl PatchHasher {
+    /// # Errors
+    ///
+    /// Returns an error if downloading `url` fails, the content isn't valid
+    /// UTF-8, or normalizing/hashing the patch fails.
     pub fn hash_patch_url(url: &str, options: &PatchOptions) -> Result<NarHash> {
         let patch_bytes = Self::download(url)?;
         let content = std::str::from_utf8(&patch_bytes)
@@ -117,11 +121,12 @@ fn normalize_patch(content: &str, options: &PatchOptions) -> Result<String> {
     // When `relative` is set, we need to strip one extra component (the
     // a/b prefix that filterdiff -p1 strips for matching) plus the
     // components in the relative path, in addition to strip_len.
-    let effective_strip = if let Some(ref relative) = options.relative {
-        1 + count_path_segments(relative) + options.strip_len
-    } else {
-        options.strip_len
-    };
+    let effective_strip = options
+        .relative
+        .as_ref()
+        .map_or(options.strip_len, |relative| {
+            1 + count_path_segments(relative) + options.strip_len
+        });
 
     // Process each patch
     let mut processed: Vec<(String, UnifiedPatch)> = Vec::new();
@@ -206,10 +211,8 @@ fn normalize_patch(content: &str, options: &PatchOptions) -> Result<String> {
                 // a/${extraPrefix}.
                 let needs_prefix = options.relative.is_some() || options.extra_prefix.is_some();
                 if needs_prefix {
-                    let prefix = match &options.extra_prefix {
-                        Some(ep) => ep.as_str(),
-                        None => "", // relative is set but no extra_prefix: use empty string
-                    };
+                    // relative may be set but no extra_prefix: default to empty string
+                    let prefix = options.extra_prefix.as_deref().unwrap_or("");
                     unified.orig_name =
                         add_prefix_bytes(&unified.orig_name, &format!("a/{}", prefix));
                     unified.mod_name =
@@ -312,14 +315,11 @@ fn add_prefix_bytes(path: &[u8], prefix: &str) -> Vec<u8> {
 
     if s.starts_with('"') {
         // C-style quoted path: unquote, add prefix, re-quote if needed
-        let (unquoted, _) = match ansi_c_unquote(&s) {
-            Some(result) => result,
-            None => {
-                // If unquoting fails, just prepend literally
-                let mut result = prefix.to_string().into_bytes();
-                result.extend_from_slice(path);
-                return result;
-            }
+        let Some((unquoted, _)) = ansi_c_unquote(&s) else {
+            // If unquoting fails, just prepend literally
+            let mut result = prefix.to_string().into_bytes();
+            result.extend_from_slice(path);
+            return result;
         };
 
         let prefixed = format!("{}{}", prefix, unquoted);
@@ -346,9 +346,7 @@ fn add_prefix_bytes(path: &[u8], prefix: &str) -> Vec<u8> {
 fn path_string(path: &[u8]) -> String {
     let s = String::from_utf8_lossy(path);
     if s.starts_with('"') {
-        ansi_c_unquote(&s)
-            .map(|(unquoted, _)| unquoted)
-            .unwrap_or_else(|| s.to_string())
+        ansi_c_unquote(&s).map_or_else(|| s.to_string(), |(unquoted, _)| unquoted)
     } else {
         s.to_string()
     }
@@ -372,9 +370,8 @@ fn strip_path_bytes(path: &[u8], n: usize) -> Vec<u8> {
 
     if s.starts_with('"') {
         // C-style quoted path
-        let (unquoted, _) = match ansi_c_unquote(&s) {
-            Some(result) => result,
-            None => return path.to_vec(),
+        let Some((unquoted, _)) = ansi_c_unquote(&s) else {
+            return path.to_vec();
         };
 
         // Don't strip /dev/null
@@ -483,8 +480,7 @@ fn fnmatch(pattern: &str, text: &str) -> bool {
     GlobBuilder::new(pattern)
         .literal_separator(false)
         .build()
-        .map(|g| g.compile_matcher().is_match(text))
-        .unwrap_or(false)
+        .is_ok_and(|g| g.compile_matcher().is_match(text))
 }
 
 #[cfg(test)]

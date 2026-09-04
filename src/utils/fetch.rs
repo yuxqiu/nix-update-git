@@ -48,6 +48,10 @@ fn build_ls_remote_args(ref_types: &[RefType], url: &str) -> Vec<String> {
 }
 
 impl GitFetcher {
+    /// # Errors
+    ///
+    /// Returns an error if `git ls-remote` fails to execute or exits
+    /// unsuccessfully.
     pub fn list_refs(url: &str, ref_types: &[RefType]) -> Result<Vec<GitRef>> {
         let args = build_ls_remote_args(ref_types, url);
 
@@ -69,19 +73,15 @@ impl GitFetcher {
         for line in output_str.lines() {
             if let Some((sha, full_ref)) = line.split_once('\t') {
                 let full_ref = full_ref.to_string();
-                let (kind, name) = if full_ref.starts_with("refs/tags/") {
-                    (
-                        RefKind::Tag,
-                        full_ref.strip_prefix("refs/tags/").unwrap().to_string(),
-                    )
-                } else if full_ref.starts_with("refs/heads/") {
-                    (
-                        RefKind::Branch,
-                        full_ref.strip_prefix("refs/heads/").unwrap().to_string(),
-                    )
-                } else {
-                    (RefKind::Other, full_ref.clone())
-                };
+                let (kind, name) = full_ref.strip_prefix("refs/tags/").map_or_else(
+                    || {
+                        full_ref.strip_prefix("refs/heads/").map_or_else(
+                            || (RefKind::Other, full_ref.clone()),
+                            |name| (RefKind::Branch, name.to_string()),
+                        )
+                    },
+                    |name| (RefKind::Tag, name.to_string()),
+                );
                 refs.push(GitRef {
                     sha: sha.to_string(),
                     kind,
@@ -94,10 +94,16 @@ impl GitFetcher {
         Ok(refs)
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if listing remote refs fails (see [`Self::list_refs`]).
     pub fn get_latest_tag(url: &str) -> Result<Option<String>> {
         Self::get_latest_tag_matching(url, None)
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if listing remote refs fails (see [`Self::list_refs`]).
     pub fn get_latest_tag_matching(url: &str, current: Option<&str>) -> Result<Option<String>> {
         let refs = Self::list_refs(url, &[RefType::Tags])?;
         let tags: Vec<&GitRef> = refs.iter().filter(|r| r.kind == RefKind::Tag).collect();
@@ -107,13 +113,16 @@ impl GitFetcher {
         }
 
         let tag_names: Vec<&str> = tags.iter().map(|t| t.name.as_str()).collect();
-        let result = match current {
-            Some(cur) => VersionDetector::latest_matching(&tag_names, cur),
-            None => VersionDetector::latest(&tag_names),
-        };
-        Ok(result.map(|s| s.to_string()))
+        let result = current.map_or_else(
+            || VersionDetector::latest(&tag_names),
+            |cur| VersionDetector::latest_matching(&tag_names, cur),
+        );
+        Ok(result.map(std::string::ToString::to_string))
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if listing remote refs fails (see [`Self::list_refs`]).
     pub fn get_latest_commit(url: &str, branch: &str) -> Result<Option<String>> {
         let refs = Self::list_refs(url, &[RefType::Heads])?;
         let branch_ref = refs
@@ -122,6 +131,9 @@ impl GitFetcher {
         Ok(branch_ref.map(|r| r.sha.clone()))
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if listing remote refs fails (see [`Self::list_refs`]).
     pub fn resolve_ref_to_sha(url: &str, tag: &str) -> Result<Option<String>> {
         let refs = Self::list_refs(url, &[RefType::Tags])?;
         let tag_ref = refs
@@ -130,6 +142,9 @@ impl GitFetcher {
         Ok(tag_ref.map(|r| r.sha.clone()))
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if listing remote refs fails (see [`Self::list_refs`]).
     pub fn list_tags(url: &str) -> Result<Vec<(String, String)>> {
         let refs = Self::list_refs(url, &[RefType::Tags])?;
         Ok(refs
