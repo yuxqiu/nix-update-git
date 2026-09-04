@@ -120,7 +120,8 @@ pub fn rule_value_names() -> Vec<&'static str> {
         .collect()
 }
 
-/// Builds a `RuleRegistry` containing the rules named in `requested`
+/// Builds a `RuleRegistry` containing the rules named in `requested`.
+///
 /// (`"all"` enables every registered rule). Shared by the CLI and by tests
 /// that need the same rule set without going through a subprocess.
 #[must_use]
