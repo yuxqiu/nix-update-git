@@ -6,11 +6,13 @@
 //! `rules/fetcher/{kind,mod,tarball}.rs` or `rules/flake_input.rs` needs to
 //! change, since those all dispatch through this trait generically.
 //!
-//! `fetchgit`, `builtins.fetchGit`, `fetchpatch`, and `fetchTarball` are
-//! deliberately not forges: they identify their target purely by a raw
-//! `url` attribute (any host already works, by construction) rather than by
-//! `owner`/`repo`, so there is no "add a new one" need for them the way
-//! there is for forges.
+//! The rule for what's a forge: does the nixpkgs fetcher function name
+//! follow the `fetchFrom<Name>` convention (`fetchFromGitHub`,
+//! `fetchFromGitiles`, ...)? If so, it's a `Forge`. `fetchgit`,
+//! `builtins.fetchGit`, `fetchpatch`, and `fetchTarball` don't, and stay as
+//! plain `FetcherKind` variants instead — this is nixpkgs' own naming
+//! convention for host-specific vs. generic fetchers, not something
+//! invented here.
 
 mod bitbucket;
 mod codeberg;

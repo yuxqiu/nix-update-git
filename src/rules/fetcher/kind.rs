@@ -6,11 +6,9 @@ use crate::parser::{AttrSpec, AttrType, ParsedAttrs};
 use crate::rules::fetcher::source_url::parse_source_url;
 
 /// A fetcher kind. Most variants wrap a registered `Forge` (see
-/// `crate::forge`) generically; `FetchGit`, `BuiltinsFetchGit`,
-/// `FetchPatch`, and `FetchTarball` are not forges — they identify their
-/// target by a raw `url` attribute (or, for `FetchPatch`/`FetchTarball`,
-/// have their own attribute contract entirely unrelated to git hosting) —
-/// so there's no "add a new one" need for them the way there is for forges.
+/// `crate::forge` for the forge-vs-plain-variant rule); `FetchGit`,
+/// `BuiltinsFetchGit`, `FetchPatch`, and `FetchTarball` aren't
+/// `fetchFrom<Name>`-named, so they stay as their own variants here instead.
 #[derive(Clone, Copy)]
 pub enum FetcherKind {
     Forge(&'static dyn Forge),
