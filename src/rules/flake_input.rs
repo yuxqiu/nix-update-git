@@ -699,6 +699,18 @@ mod tests {
     }
 
     #[test]
+    fn test_sourcehut_to_remote_url_does_not_double_tilde() {
+        // The owner already carries `~` after parsing `sourcehut:~user/repo`
+        // — regression test for a bug where `to_remote_url()` blindly
+        // prepended another `~`.
+        let result = FlakeInputRule::parse_flake_url("sourcehut:~user/repo").unwrap();
+        assert_eq!(
+            result.flake_url.to_remote_url(),
+            Some("https://git.sr.ht/~user/repo".to_string())
+        );
+    }
+
+    #[test]
     fn test_reconstruct_github_url() {
         let new_url =
             FlakeInputRule::reconstruct_url("github:gmodena/nix-flatpak/?ref=v0.6.0", "v0.7.0");

@@ -4,9 +4,8 @@ use std::path::{Path, PathBuf};
 
 use libtest_mimic::{Arguments, Failed, Trial};
 use nix_update_git::checker::check_file;
-use nix_update_git::cli::default_rules;
 use nix_update_git::presentation::{FileDiff, render};
-use nix_update_git::rules::build_registry;
+use nix_update_git::rules::{build_registry, default_rule_ids};
 use walkdir::WalkDir;
 
 fn parse_redact_directive(nix_path: &Path) -> HashSet<String> {
@@ -33,7 +32,7 @@ fn is_ignored(nix_path: &Path) -> bool {
 /// all, so a `# redact: ... range` directive is accepted but has nothing to
 /// do — it's a leftover from the JSON-based format this replaced.
 fn render_snapshot(nix_path: &Path, redact_fields: &HashSet<String>) -> Result<String, Failed> {
-    let registry = build_registry(&default_rules());
+    let registry = build_registry(&default_rule_ids());
     let fr = check_file(nix_path, &registry)
         .map_err(|e| Failed::from(format!("check_file failed: {e}")))?;
     let mut diff = FileDiff::from_result(&fr);

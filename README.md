@@ -48,7 +48,7 @@ Options:
   -i, --interactive      Confirm each update
   -v, --verbose          Enable verbose output
   -j, --jobs <N>         Number of parallel file processing jobs [default: 4]
-  -r, --rules <RULES>... Rules to enable [default: fetcher flake mk-derivation build-vim-plugin]
+  -r, --rules <RULES>... Rules to enable [default: flake fetcher mk-derivation build-vim-plugin]
   -h, --help             Print help
   -V, --version          Print version
 ```

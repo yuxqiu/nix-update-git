@@ -1,4 +1,7 @@
 mod core;
+mod extract;
+mod hashing;
+mod resolve;
 
 pub use core::DerivationRule;
 

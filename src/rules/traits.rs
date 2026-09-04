@@ -168,6 +168,10 @@ impl RuleRegistry {
         self.rules.push(Box::new(rule));
     }
 
+    pub fn register_boxed(&mut self, rule: Box<dyn UpdateRule>) {
+        self.rules.push(rule);
+    }
+
     pub fn check_all(
         &self,
         root: &NixNode,

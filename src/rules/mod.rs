@@ -13,58 +13,120 @@ pub use fetcher::FetcherRule;
 pub use flake_input::FlakeInputRule;
 pub use traits::{CheckResult, CheckWarning, RuleRegistry, Update, UpdateGroup, UpdateRule};
 
-use crate::cli::RuleName;
+/// One entry in the rule registry: an id the CLI/tests refer to it by,
+/// whether it's on by default, and how to build it. Adding a rule means
+/// adding one entry here — `main.rs`, `cli.rs`, and the snapshot test
+/// harness all consume `RULES` generically.
+pub struct RuleDescriptor {
+    pub id: &'static str,
+    pub default_enabled: bool,
+    pub build: fn() -> Box<dyn UpdateRule>,
+}
 
-/// Builds a `RuleRegistry` containing the rules enabled by `rules`
-/// (interpreting `RuleName::All` as "every rule"). Shared by the CLI and by
-/// tests that need the same default rule set without going through a
-/// subprocess.
-pub fn build_registry(rules: &[RuleName]) -> RuleRegistry {
+pub const RULES: &[RuleDescriptor] = &[
+    RuleDescriptor {
+        id: "flake",
+        default_enabled: true,
+        build: || Box::new(FlakeInputRule),
+    },
+    RuleDescriptor {
+        id: "fetcher",
+        default_enabled: true,
+        build: || Box::new(FetcherRule),
+    },
+    RuleDescriptor {
+        id: "mk-derivation",
+        default_enabled: true,
+        build: || Box::new(mk_derivation_rule()),
+    },
+    RuleDescriptor {
+        id: "build-vim-plugin",
+        default_enabled: true,
+        build: || Box::new(build_vim_plugin_rule()),
+    },
+    RuleDescriptor {
+        id: "build-rust-package",
+        default_enabled: false,
+        build: || Box::new(build_rust_package_rule()),
+    },
+    RuleDescriptor {
+        id: "build-go-module",
+        default_enabled: false,
+        build: || Box::new(build_go_module_rule()),
+    },
+    RuleDescriptor {
+        id: "build-python-package",
+        default_enabled: false,
+        build: || Box::new(build_python_package_rule()),
+    },
+    RuleDescriptor {
+        id: "build-dune-package",
+        default_enabled: false,
+        build: || Box::new(build_dune_package_rule()),
+    },
+    RuleDescriptor {
+        id: "build-npm-package",
+        default_enabled: false,
+        build: || Box::new(build_npm_package_rule()),
+    },
+    RuleDescriptor {
+        id: "build-mix-package",
+        default_enabled: false,
+        build: || Box::new(build_mix_package_rule()),
+    },
+    RuleDescriptor {
+        id: "build-rebar3-release",
+        default_enabled: false,
+        build: || Box::new(build_rebar3_release_rule()),
+    },
+    RuleDescriptor {
+        id: "build-gem",
+        default_enabled: false,
+        build: || Box::new(build_gem_rule()),
+    },
+    RuleDescriptor {
+        id: "build-haskell-package",
+        default_enabled: false,
+        build: || Box::new(build_haskell_package_rule()),
+    },
+    RuleDescriptor {
+        id: "build-emscripten-package",
+        default_enabled: false,
+        build: || Box::new(build_emscripten_package_rule()),
+    },
+];
+
+/// The `all` sentinel accepted by `--rules`, meaning "every registered rule".
+pub const ALL_RULES_SENTINEL: &str = "all";
+
+/// Rule ids enabled by default (used as `--rules`' default value).
+pub fn default_rule_ids() -> Vec<String> {
+    RULES
+        .iter()
+        .filter(|r| r.default_enabled)
+        .map(|r| r.id.to_string())
+        .collect()
+}
+
+/// All valid `--rules` values: every registered rule id, plus `all`.
+pub fn rule_value_names() -> Vec<&'static str> {
+    RULES
+        .iter()
+        .map(|r| r.id)
+        .chain(std::iter::once(ALL_RULES_SENTINEL))
+        .collect()
+}
+
+/// Builds a `RuleRegistry` containing the rules named in `requested`
+/// (`"all"` enables every registered rule). Shared by the CLI and by tests
+/// that need the same rule set without going through a subprocess.
+pub fn build_registry(requested: &[String]) -> RuleRegistry {
+    let all = requested.iter().any(|r| r == ALL_RULES_SENTINEL);
     let mut registry = RuleRegistry::new();
-    let rule_enabled = |name: &str| rules.iter().any(|r| r.is_enabled(name));
-
-    if rule_enabled("flake") {
-        registry.register(FlakeInputRule);
+    for rule in RULES {
+        if all || requested.iter().any(|r| r == rule.id) {
+            registry.register_boxed((rule.build)());
+        }
     }
-    if rule_enabled("fetcher") {
-        registry.register(FetcherRule);
-    }
-    if rule_enabled("mk-derivation") {
-        registry.register(mk_derivation_rule());
-    }
-    if rule_enabled("build-vim-plugin") {
-        registry.register(build_vim_plugin_rule());
-    }
-    if rule_enabled("build-rust-package") {
-        registry.register(build_rust_package_rule());
-    }
-    if rule_enabled("build-go-module") {
-        registry.register(build_go_module_rule());
-    }
-    if rule_enabled("build-python-package") {
-        registry.register(build_python_package_rule());
-    }
-    if rule_enabled("build-dune-package") {
-        registry.register(build_dune_package_rule());
-    }
-    if rule_enabled("build-npm-package") {
-        registry.register(build_npm_package_rule());
-    }
-    if rule_enabled("build-mix-package") {
-        registry.register(build_mix_package_rule());
-    }
-    if rule_enabled("build-rebar3-release") {
-        registry.register(build_rebar3_release_rule());
-    }
-    if rule_enabled("build-gem") {
-        registry.register(build_gem_rule());
-    }
-    if rule_enabled("build-haskell-package") {
-        registry.register(build_haskell_package_rule());
-    }
-    if rule_enabled("build-emscripten-package") {
-        registry.register(build_emscripten_package_rule());
-    }
-
     registry
 }

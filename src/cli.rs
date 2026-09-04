@@ -1,61 +1,7 @@
-use clap::{Parser, ValueEnum};
+use clap::Parser;
+use clap::builder::PossibleValuesParser;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum RuleName {
-    All,
-    Fetcher,
-    Flake,
-    MkDerivation,
-    BuildRustPackage,
-    BuildGoModule,
-    BuildPythonPackage,
-    BuildDunePackage,
-    BuildNpmPackage,
-    BuildMixPackage,
-    BuildRebar3Release,
-    BuildGem,
-    BuildHaskellPackage,
-    BuildEmscriptenPackage,
-    BuildVimPlugin,
-}
-
-impl RuleName {
-    pub fn rule_id(&self) -> &'static str {
-        match self {
-            RuleName::All => "all",
-            RuleName::Fetcher => "fetcher",
-            RuleName::Flake => "flake",
-            RuleName::MkDerivation => "mk-derivation",
-            RuleName::BuildRustPackage => "build-rust-package",
-            RuleName::BuildGoModule => "build-go-module",
-            RuleName::BuildPythonPackage => "build-python-package",
-            RuleName::BuildDunePackage => "build-dune-package",
-            RuleName::BuildNpmPackage => "build-npm-package",
-            RuleName::BuildMixPackage => "build-mix-package",
-            RuleName::BuildRebar3Release => "build-rebar3-release",
-            RuleName::BuildGem => "build-gem",
-            RuleName::BuildHaskellPackage => "build-haskell-package",
-            RuleName::BuildEmscriptenPackage => "build-emscripten-package",
-            RuleName::BuildVimPlugin => "build-vim-plugin",
-        }
-    }
-
-    pub fn is_enabled(&self, name: &str) -> bool {
-        if matches!(self, RuleName::All) {
-            return true;
-        }
-        self.rule_id() == name
-    }
-}
-
-pub fn default_rules() -> Vec<RuleName> {
-    vec![
-        RuleName::Fetcher,
-        RuleName::Flake,
-        RuleName::MkDerivation,
-        RuleName::BuildVimPlugin,
-    ]
-}
+use crate::rules::{default_rule_ids, rule_value_names};
 
 #[derive(Parser, Debug)]
 #[command(name = "nix-update-git")]
@@ -89,10 +35,10 @@ pub struct Cli {
     #[arg(
         short,
         long,
-        value_enum,
+        value_parser = PossibleValuesParser::new(rule_value_names()),
         num_args = 1..,
-        default_values_t = default_rules(),
+        default_values_t = default_rule_ids(),
         help = "Rules to enable"
     )]
-    pub rules: Vec<RuleName>,
+    pub rules: Vec<String>,
 }

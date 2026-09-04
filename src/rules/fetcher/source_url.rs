@@ -17,6 +17,12 @@
 //! - **Archive URLs**: tarball/zip download URLs (`/archive/{ref}.tar.gz`,
 //!   `-/archive/{ref}/...`, `/get/{ref}.tar.gz`, `/+archive/{ref}.tar.gz`,
 //!   `/snapshot/{ref}.tar.gz`, and `.zip` variants).
+//!
+//! TODO: `SourcePlatform` is deliberately not part of `crate::forge`'s
+//! `Forge` trait/registry — it recognizes web URLs by path template, not
+//! owner/repo/domain attrs, so it doesn't share `Forge`'s shape. See
+//! `docs/DESIGN.md` §8 for what unifying them would take and why it's
+//! left as an open question rather than resolved either way.
 
 use crate::utils::VersionDetector;
 

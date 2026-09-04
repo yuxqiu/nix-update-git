@@ -102,19 +102,42 @@ impl Forge for SourceHut {
         ))
     }
 
-    // NOTE: preserved verbatim from the pre-refactor `FlakeUrl::SourceHut`
-    // impl, including two pre-existing quirks that are out of scope for
-    // this refactor: `remote_url_for_flake` always prepends `~` (so an
-    // `owner` that already includes it, e.g. parsed from
-    // `sourcehut:~user/repo`, doubles up), and it resolves against `sr.ht`
-    // rather than `git.sr.ht` like everywhere else in this file.
-    // `display_for_flake` does not have either issue.
     fn remote_url_for_flake(&self, owner: &str, repo: &str) -> String {
-        format!("https://sr.ht/~{}/{}", owner, repo)
+        let owner = ensure_tilde(owner);
+        format!("https://git.sr.ht/{}/{}", owner, repo)
     }
 
     fn display_for_flake(&self, owner: &str, repo: &str) -> String {
         let owner = ensure_tilde(owner);
         format!("git.sr.ht/{}/{}", owner, repo)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_remote_url_for_flake_adds_tilde_once() {
+        assert_eq!(
+            SourceHut.remote_url_for_flake("sirhc", "repo"),
+            "https://git.sr.ht/~sirhc/repo"
+        );
+    }
+
+    #[test]
+    fn test_remote_url_for_flake_does_not_double_tilde() {
+        assert_eq!(
+            SourceHut.remote_url_for_flake("~sirhc", "repo"),
+            "https://git.sr.ht/~sirhc/repo"
+        );
+    }
+
+    #[test]
+    fn test_display_for_flake_matches_remote_url_shape() {
+        assert_eq!(
+            SourceHut.display_for_flake("~sirhc", "repo"),
+            "git.sr.ht/~sirhc/repo"
+        );
     }
 }
