@@ -1,67 +1,57 @@
 # nix-update-git
 
-Update git references in Nix flake files and Nix expressions.
+Update git references in Nix flakes and package expressions.
 
-`nix-update-git` detects outdated version tags and branch commits in flake inputs and fetcher calls, then updates them in place.
+`nix-update-git` finds newer version tags or branch commits, shows the proposed
+changes as a diff, and can apply them in place. It supports flake inputs,
+standalone nixpkgs fetchers, `mkDerivation`, `buildVimPlugin`, and opt-in rules
+for other package builders.
 
-## Features
+## Highlights
 
-- **Flake inputs**: update `ref` values and inline `?ref=` in URL strings
-- **Fetcher calls**: update `rev`, `tag`, and `ref` in `fetchgit`, `fetchFromGitHub`, `fetchFromGitLab`, `fetchFromGitea`, `fetchFromForgejo`, `fetchFromCodeberg`, `fetchFromSourcehut`, `fetchFromBitbucket`, `fetchFromRepoOrCz`, `fetchFromGitiles`, `fetchpatch`, `fetchTarball`, and `builtins.fetchGit`
-- **mkDerivation**: update `version` and corresponding source ref (`tag`/`rev`/`ref`) and hash in `stdenv.mkDerivation rec { ... }` patterns
-- **buildVimPlugin**: update `version` and corresponding source ref and hash in `vimUtils.buildVimPlugin { ... }` patterns
-- **Derivation rules**: additional rules for language-specific builders (`buildRustPackage`, `buildGoModule`, `buildPythonPackage`, etc.) that follow the same `version` + `src` pattern as `mkDerivation`; not enabled by default due to extra dependencies (e.g. `cargoHash`, `vendorHash`)
-- **Branch following**: use `# follow:branch <name>` comments to track a branch's latest commit instead of version tags
-- **Pinning**: `# pin` comments on any input or fetcher call skips it entirely
-- **Multiple modes**: check (default), update, and interactive
+- Check for updates without modifying files (the default)
+- Update revisions and their hashes together
+- Review changes interactively, hunk by hunk
+- Track branches, matching tags, or semantic-version ranges with `# follow:`
+- Leave a version fixed with `# pin`
+- Process individual `.nix` files or whole directories in parallel
+
+See the [rule and pattern reference](docs/REFERENCE.md) for supported fetchers,
+package builders, URL forms, and directive details.
 
 ## Installation
 
-### With nix
+### Run with Nix
 
 ```bash
-nix run github:yuxqiu/nix-update-git
+nix run github:yuxqiu/nix-update-git -- flake.nix
 ```
 
-Or add to your flake inputs:
+Or add the project to your flake inputs:
 
 ```nix
 inputs.nix-update-git.url = "github:yuxqiu/nix-update-git";
 ```
 
-### From source
+### Install from source
 
 ```bash
 cargo install --git https://github.com/yuxqiu/nix-update-git
 ```
 
-Requires `git` on `$PATH` at runtime.
+The installed program requires `git` on `PATH` at runtime.
 
 ## Usage
 
-```
-nix-update-git [OPTIONS] [FILES_OR_DIRECTORIES]...
-
-Options:
-  -c, --check            Check without making changes (default)
-  -u, --update           Perform updates
-  -i, --interactive      Confirm each update
-  -v, --verbose          Enable verbose output
-  -j, --jobs <N>         Number of parallel file processing jobs [default: 4]
-  -r, --rules <RULES>... Rules to enable [default: flake fetcher mk-derivation build-vim-plugin]
-  -h, --help             Print help
-  -V, --version          Print version
-```
-
-### Check mode (default)
-
-Output reads as a diff — what would change, and where:
+Check a file for available updates:
 
 ```bash
 nix-update-git flake.nix
 ```
 
-```
+The output is a diff and no file is changed:
+
+```text
 flake.nix
   github.com/foo/mylib
     inputs.mylib.ref
@@ -69,253 +59,81 @@ flake.nix
     + "v2.0.0"
 ```
 
-### Update mode
+Apply all updates:
 
 ```bash
 nix-update-git --update flake.nix
 ```
 
-### Multiple files or directories
-
-```bash
-nix-update-git flake.nix ./path/to/nix/
-```
-
-### Interactive mode
-
-Confirms each change one at a time, using the same `[y,n,a,q,?]` vocabulary as `git add -p`:
+Review each update before applying it:
 
 ```bash
 nix-update-git --update --interactive flake.nix
 ```
 
-```
-Hunk 1/1 — flake.nix: github.com/foo/mylib
-    inputs.mylib.ref
-    - "v1.0.0"
-    + "v2.0.0"
-Apply this hunk? [y,n,a,q,?]
-```
+Interactive mode uses the familiar `git add -p` choices: `y` accepts one
+hunk, `n` skips it, `a` accepts it and all remaining hunks, and `q` stops.
 
-`y` applies just this hunk, `n` skips it, `a` applies it and every remaining hunk, `q` stops without applying anything further.
-
-## Rules
-
-`nix-update-git` uses rules to detect and apply updates. Each rule targets a specific pattern. By default, `fetcher`, `flake`, and `mk-derivation` are enabled. Additional derivation rules can be enabled via `--rules`:
+Files and directories can be mixed:
 
 ```bash
-# Enable buildRustPackage rule alongside defaults
-nix-update-git --rules fetcher --rules flake --rules mk-derivation --rules build-rust-package file.nix
-
-# Enable all rules
-nix-update-git --rules all file.nix
+nix-update-git flake.nix ./packages/
 ```
 
-### Available rules
+### Selecting rules
 
-| Rule | Default | Nix function names | Description |
-| --- | --- | --- | --- |
-| `fetcher` | yes | — | Standalone fetcher calls (`fetchgit`, `fetchFromGitHub`, etc.) |
-| `flake` | yes | — | Flake input URLs and refs |
-| `mk-derivation` | yes | `mkDerivation` | `stdenv.mkDerivation rec { version = ...; src = fetchX { ... }; }` |
-| `build-vim-plugin` | yes | `vimUtils.buildVimPlugin` | Vim/Neovim plugins |
-| `build-rust-package` | no | `buildRustPackage` | Rust packages (note: does not update `cargoHash`/`cargoHash`) |
-| `build-go-module` | no | `buildGoModule`, `buildGoPackage` | Go modules (note: does not update `vendorHash`) |
-| `build-python-package` | no | `buildPythonPackage`, `buildPythonApplication` | Python packages |
-| `build-dune-package` | no | `buildDunePackage` | OCaml/Dune packages |
-| `build-npm-package` | no | `buildNpmPackage` | Node.js packages |
-| `build-mix-package` | no | `buildMixPackage` | Elixir packages |
-| `build-rebar3-release` | no | `buildRebar3Release` | Erlang packages |
-| `build-gem` | no | `buildGem` | Ruby gems |
-| `build-haskell-package` | no | `buildHaskellPackage`, `mkHaskellPackage` | Haskell packages |
-| `build-emscripten-package` | no | `buildEmscriptenPackage` | Emscripten packages |
+The default rules cover flakes, standalone fetchers, `mkDerivation`, and
+`buildVimPlugin`. Choose rules explicitly by repeating `--rules`, or enable
+every rule with `all`:
 
-The `fetcher` rule never processes `src =` attributes inside any of the derivation-wrapper functions above — the derivation rules handle those exclusively. Enabling a derivation rule is needed for version updates in those patterns; the fetcher rule handles standalone fetcher calls regardless.
+```bash
+nix-update-git \
+  --rules flake \
+  --rules fetcher \
+  --rules build-rust-package \
+  package.nix
 
-## Supported patterns
-
-### Flake inputs — separate `ref`
-
-```nix
-inputs.mylib = {
-  url = "github:owner/repo";
-  ref = "v1.0.0";
-};
+nix-update-git --rules all package.nix
 ```
 
-### Flake inputs — inline `?ref=`
+Some package-builder rules are opt-in because they do not update auxiliary
+dependency hashes such as `cargoHash` or `vendorHash`. The
+[rule reference](docs/REFERENCE.md#available-rules) lists every rule and its
+default status.
 
-```nix
-inputs.mylib.url = "github:owner/repo?ref=v1.0.0";
-# or
-inputs.mylib = "git+https://example.com/repo.git?ref=v1.0.0";
+### Command-line options
+
+```text
+Usage: nix-update-git [OPTIONS] [FILES_OR_DIRECTORIES]...
+
+Arguments:
+  [FILES_OR_DIRECTORIES]...  Nix files or directories containing .nix files
+
+Options:
+  -c, --check             Check without making changes (default)
+  -u, --update            Perform updates
+  -i, --interactive       Confirm each update
+  -v, --verbose           Enable verbose output
+  -j, --jobs <N>          Number of parallel file processing jobs [default: 4]
+  -r, --rules <RULES>...  Rules to enable [default: flake fetcher mk-derivation build-vim-plugin]
+  -h, --help              Print help
+  -V, --version           Print version
 ```
 
-### Fetcher calls
+## Documentation
 
-```nix
-src = pkgs.fetchFromGitHub {
-  owner = "owner";
-  repo = "repo";
-  rev = "v1.0.0";
-  hash = "sha256-...";
-};
-```
-
-All standard nixpkgs fetchers are supported (`fetchgit`, `fetchFromGitHub`, `fetchFromGitLab`, `fetchFromGitea`, `fetchFromForgejo`, `fetchFromCodeberg`, `fetchFromSourcehut`, `fetchFromBitbucket`, `fetchFromGitiles`, `fetchFromRepoOrCz`, `fetchpatch`, `fetchTarball`, `builtins.fetchGit`).
-
-### mkDerivation
-
-`mkDerivation` updates `version` together with the source ref in `src` (priority: `tag` > `rev` > `ref`) and refreshes `hash`/`sha256` when needed.
-
-Supported source-ref behaviors:
-
-- Pure version ref equal to `version` (for example `rev = "v1.0.0"`) updates both together.
-- Pure commit-hash ref uses `version` to find newer upstream tags, then updates `version` and the ref.
-- Empty source ref can be populated from `version`.
-- Interpolated source refs that depend on `${version}` (in `rec` attrsets) update `version`; the interpolated ref text stays as-is.
-- Interpolated source refs that combine `${pname}` and `${version}` (for example `rev = "${pname}-${version}"`) update `version`; the interpolated ref text stays as-is.
-
-Fetcher attributes may also reference `pname` and other pure string attributes from the `mkDerivation` attrset via bare idents or string interpolation, when the attrset is `rec` or lambda-wrapped:
-
-```nix
-stdenv.mkDerivation rec {
-  pname = "my-package";
-  version = "1.0.0";
-  src = fetchFromGitHub {
-    owner = "my-org";
-    repo = pname;                    # bare ident
-    rev = "v${version}";
-    hash = "sha256-...";
-  };
-};
-```
-
-```nix
-stdenv.mkDerivation (finalAttrs: {
-  pname = "my-package";
-  version = "1.0.0";
-  src = fetchFromGitHub {
-    owner = "${finalAttrs.pname}-org";  # dotted interpolation
-    repo = finalAttrs.pname;            # bare ident
-    rev = "v${finalAttrs.version}";
-    hash = "sha256-...";
-  };
-});
-```
-
-Any pure string attribute (not just `pname`) from the `mkDerivation` attrset can be referenced this way. Without `rec` or a lambda wrapper, variable references in the fetcher are not resolved and the call is skipped.
-
-```nix
-stdenv.mkDerivation rec {
-  name = "foo-${version}";
-  version = "1.0.0";
-  src = fetchgit {
-    url = "https://github.com/owner/repo";
-    rev = "e67cc2e189679f991690ade03d0ee88566d2eb0f";
-    sha256 = "0nmyp5yrzl9dbq85wyiimsj9fklb8637a1936nw7zzvlnzkgh28n";
-  };
-};
-```
-
-When the `# pin` comment is present on the `mkDerivation` call, the entire block is skipped.
-
-### Branch following
-
-Use `# follow:branch <name>` to track a branch's latest commit instead of version tags:
-
-```nix
-src = fetchgit { # follow:branch master
-  url = "https://github.com/owner/repo";
-  rev = "e67cc2e189679f991690ade03d0ee88566d2eb0f";
-  hash = "sha256-...";
-};
-```
-
-The `# follow:` directive supports three modes:
-
-| Mode   | Syntax                          | Behavior                                                                                                                        |
-| ------ | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Branch | `# follow:branch <name>`        | Tracks the latest commit on the given branch                                                                                    |
-| Regex  | `# follow:regex <pattern>`      | Finds the latest tag matching `^<pattern>$` (full match) and resolves it to a SHA                                               |
-| Semver | `# follow:semver <requirement>` | Finds the latest tag whose version (after stripping prefix like `v`) satisfies the semver requirement, and resolves it to a SHA |
-
-Examples:
-
-```nix
-# Follow the main branch
-src = fetchgit { # follow:branch main
-  url = "https://github.com/owner/repo";
-  rev = "0000000000000000000000000000000000000000";
-  hash = "sha256-...";
-};
-
-# Follow tags matching a regex (full match)
-src = fetchgit { # follow:regex v[0-9]+\.[0-9]+\.[0-9]+
-  url = "https://github.com/owner/repo";
-  rev = "0000000000000000000000000000000000000000";
-  hash = "sha256-...";
-};
-
-# Follow tags within a semver range (prefix like 'v' is auto-stripped)
-src = fetchFromGitHub { # follow:semver ^0.1
-  owner = "owner";
-  repo = "repo";
-  rev = "v0.1.0";
-  hash = "sha256-...";
-};
-
-# Only allow updates within 0.x
-src = fetchFromGitHub { # follow:semver <1.0.0
-  owner = "owner";
-  repo = "repo";
-  rev = "v0.5.0";
-  hash = "sha256-...";
-};
-
-# fetchpatch also supports follow directives
-patches = [ (fetchpatch { # follow:branch main
-  url = "https://github.com/owner/repo/commit/abc123.patch";
-  hash = "";
-}) ];
-```
-
-### Pinned inputs
-
-Any input or fetcher call with a `# pin` comment is skipped:
-
-```nix
-inputs.stable = { # pin
-  url = "github:owner/repo";
-  ref = "v1.0.0";
-};
-```
-
-```nix
-src = fetchFromGitHub { # pin
-  owner = "owner";
-  repo = "repo";
-  rev = "v1.0.0";
-  hash = "sha256-...";
-};
-```
-
-### Supported URL types
-
-| Type      | Example                              |
-| --------- | ------------------------------------ |
-| GitHub    | `github:owner/repo`                  |
-| GitLab    | `gitlab:owner/repo`                  |
-| SourceHut | `sourcehut:~user/repo`               |
-| Git HTTPS | `git+https://example.com/repo.git`   |
-| Git SSH   | `git+ssh://git@example.com/repo.git` |
-| Git local | `git+file:///path/to/repo`           |
+- [Rule and pattern reference](docs/REFERENCE.md) — supported inputs,
+  fetchers, builders, and directives
+- [Contributing tests](docs/CONTRIBUTING_TESTS.md) — test layout and snapshot
+  workflow
 
 ## Acknowledgments
 
-This project was inspired by [update-nix-fetchgit](https://github.com/expipiplus1/update-nix-fetchgit), which provides similar functionality for updating fetcher calls.
-
-The built-in `nix-prefetch-git` crate (`nix-prefetch-git/`) is a pure-Rust reimplementation of the [shell-based `nix-prefetch-git`](https://github.com/NixOS/nixpkgs/blob/master/pkgs/build-support/fetchgit/nix-prefetch-git) from nixpkgs. It replicates the same git clone, deterministic cleanup, and NAR hashing logic, removing the runtime dependency on the external `nix-prefetch-git`, `nix-hash`, and `nix-store` binaries.
+Inspired by
+[update-nix-fetchgit](https://github.com/expipiplus1/update-nix-fetchgit).
+The project includes a pure-Rust implementation of `nix-prefetch-git`, so it
+does not require the external `nix-prefetch-git`, `nix-hash`, or `nix-store`
+executables at runtime.
 
 ## License
 
